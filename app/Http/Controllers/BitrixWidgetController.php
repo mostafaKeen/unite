@@ -97,6 +97,8 @@ class BitrixWidgetController extends Controller
             'date' => 'required|string', // dd-MM-yyyy
         ]);
 
+        Log::info("[Bitrix Widget] Available slots requested for tenant {$tenant->name}", $validated);
+
         $slots = $this->uniteClient->getAvailableSlots(
             $tenant,
             $validated['clinic_id'],
@@ -115,39 +117,69 @@ class BitrixWidgetController extends Controller
      */
     public function bookAppointment(Request $request, Tenant $tenant): JsonResponse
     {
-        $validated = $request->validate([
-            'b24_deal_id' => 'nullable|string',
-            'b24_contact_id' => 'nullable|string',
-            'clinicid' => 'required|string',
-            'clinicname' => 'nullable|string',
-            'doctorid' => 'required|string',
-            'doctorname' => 'nullable|string',
-            'firstname' => 'required|string|max:100',
-            'middlename' => 'nullable|string|max:100',
-            'lastname' => 'required|string|max:100',
-            'gender' => 'required|in:M,F,U',
-            'mobileno' => 'required|string', // Flexible phone formatting without forced normalization
-            'emailid' => 'nullable|email',
-            'dob' => 'nullable|string',
-            'phototype' => 'nullable|string',
-            'photoid' => 'nullable|string',
-            'startdatetime' => 'required|string', // dd-MM-yyyy HH:mm
-            'duration' => 'nullable|string',
-            'remarks' => 'nullable|string|max:2000',
-            'requestedby' => 'nullable|string|max:100',
-            'itemcode' => 'nullable|array',
-            'itemcode.*' => 'integer',
+        Log::info("[Bitrix Widget] Booking appointment request received for tenant {$tenant->name} (ID: {$tenant->id})", [
+            'method' => $request->method(),
+            'url' => $request->fullUrl(),
+            'payload' => $request->all(),
         ]);
 
         try {
+            $validated = $request->validate([
+                'b24_deal_id' => 'nullable|string',
+                'b24_contact_id' => 'nullable|string',
+                'clinicid' => 'required|string',
+                'clinicname' => 'nullable|string',
+                'doctorid' => 'required|string',
+                'doctorname' => 'nullable|string',
+                'firstname' => 'required|string|max:100',
+                'middlename' => 'nullable|string|max:100',
+                'lastname' => 'required|string|max:100',
+                'gender' => 'required|in:M,F,U',
+                'mobileno' => 'required|string', // Flexible phone formatting without forced normalization
+                'emailid' => 'nullable|email',
+                'dob' => 'nullable|string',
+                'phototype' => 'nullable|string',
+                'photoid' => 'nullable|string',
+                'startdatetime' => 'required|string', // dd-MM-yyyy HH:mm
+                'duration' => 'nullable|string',
+                'remarks' => 'nullable|string|max:2000',
+                'requestedby' => 'nullable|string|max:100',
+                'itemcode' => 'nullable|array',
+                'itemcode.*' => 'integer',
+            ]);
+
+            Log::info("[Bitrix Widget] Booking validation passed", ['validated' => $validated]);
+
             $appointment = $this->syncService->bookFromBitrix($tenant, $validated);
+
+            Log::info("[Bitrix Widget] Appointment booking completed successfully", [
+                'appointment_id' => $appointment->id,
+                'unite_appointment_id' => $appointment->unite_appointment_id,
+                'status' => $appointment->status,
+            ]);
 
             return response()->json([
                 'success' => true,
                 'message' => 'Appointment successfully booked in Unite EMR',
                 'appointment' => $appointment,
             ]);
+        } catch (\Illuminate\Validation\ValidationException $ve) {
+            Log::warning("[Bitrix Widget] Booking validation error for tenant {$tenant->name}", [
+                'errors' => $ve->errors(),
+                'input' => $request->all(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Validation error: ' . implode(', ', array_map(fn($e) => implode(' ', $e), $ve->errors())),
+                'errors' => $ve->errors(),
+            ], 422);
         } catch (\Exception $e) {
+            Log::error("[Bitrix Widget] Booking failed for tenant {$tenant->name}: {$e->getMessage()}", [
+                'exception' => get_class($e),
+                'trace' => $e->getTraceAsString(),
+            ]);
+
             return response()->json([
                 'success' => false,
                 'message' => 'Booking failed: ' . $e->getMessage(),

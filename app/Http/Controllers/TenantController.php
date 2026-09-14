@@ -8,6 +8,7 @@ use App\Services\Bitrix\BitrixService;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Str;
+use Illuminate\Support\Facades\Log;
 
 class TenantController extends Controller
 {
@@ -108,6 +109,8 @@ class TenantController extends Controller
      */
     public function testUniteConnection(Tenant $tenant): JsonResponse
     {
+        Log::info("[Tenant] Testing Unite connection for tenant: {$tenant->name} (ID: {$tenant->id})");
+
         try {
             // 1. Authorize
             $token = $this->uniteClient->ensureValidToken($tenant);
@@ -117,6 +120,11 @@ class TenantController extends Controller
             
             // 3. Fetch doctors
             $doctors = $this->uniteClient->getDoctors($tenant, true);
+
+            Log::info("[Tenant] Unite connection test successful for {$tenant->name}", [
+                'clinics_count' => count($clinics),
+                'doctors_count' => count($doctors),
+            ]);
 
             return response()->json([
                 'success' => true,
@@ -135,6 +143,10 @@ class TenantController extends Controller
                 ],
             ]);
         } catch (\Exception $e) {
+            Log::error("[Tenant] Unite connection test failed for {$tenant->name}: {$e->getMessage()}", [
+                'trace' => $e->getTraceAsString(),
+            ]);
+
             return response()->json([
                 'success' => false,
                 'status' => 'error',
@@ -148,10 +160,18 @@ class TenantController extends Controller
      */
     public function syncDirectories(Tenant $tenant): JsonResponse
     {
+        Log::info("[Tenant] Syncing directories from Unite for tenant: {$tenant->name}");
+
         try {
             $clinics = $this->uniteClient->getClinics($tenant, true);
             $doctors = $this->uniteClient->getDoctors($tenant, true);
             $items = $this->uniteClient->getItemDetails($tenant, true);
+
+            Log::info("[Tenant] Directories synced for {$tenant->name}", [
+                'clinics_count' => count($clinics),
+                'doctors_count' => count($doctors),
+                'items_count' => count($items),
+            ]);
 
             return response()->json([
                 'success' => true,
@@ -163,6 +183,8 @@ class TenantController extends Controller
                 ],
             ]);
         } catch (\Exception $e) {
+            Log::error("[Tenant] Sync directories failed for {$tenant->name}: {$e->getMessage()}");
+
             return response()->json([
                 'success' => false,
                 'message' => $e->getMessage(),
