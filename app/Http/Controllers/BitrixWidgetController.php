@@ -9,6 +9,7 @@ use App\Services\Bitrix\BitrixService;
 use App\Services\Sync\AppointmentSyncService;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Support\Facades\Log;
 use Inertia\Inertia;
 use Inertia\Response;
 
