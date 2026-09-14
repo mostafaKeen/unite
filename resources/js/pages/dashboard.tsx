@@ -644,6 +644,37 @@ export default function Dashboard({
                                         </div>
                                     </div>
 
+                                    {/* Bitrix24 Local App Quick Setup Helper Box */}
+                                    <div className="mt-4 p-4 rounded-xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-800 text-xs">
+                                        <div className="flex items-center justify-between font-bold text-slate-800 dark:text-slate-200 mb-2">
+                                            <span className="flex items-center gap-1.5 text-xs text-[#00a5b5]">
+                                                <KeyRound className="w-4 h-4" /> Bitrix24 Local Application Config & Handler Links
+                                            </span>
+                                            <span className="text-[10px] text-slate-400 font-normal">
+                                                Bitrix24 Portal &gt; Developer resources &gt; Other &gt; Local Application
+                                            </span>
+                                        </div>
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-2">
+                                            <div className="bg-white dark:bg-slate-900 p-2.5 rounded-lg border border-slate-100 dark:border-slate-800">
+                                                <span className="text-slate-400 block text-[10px] font-semibold mb-0.5">
+                                                    1. Handler URL (Installation & Webhook Callback)
+                                                </span>
+                                                <code className="block font-mono text-[11px] text-slate-700 dark:text-slate-300 break-all select-all bg-slate-50 dark:bg-slate-800 p-1 rounded border border-slate-200 dark:border-slate-700">
+                                                    {window.location.origin}/api/b24/webhook/{t.id}
+                                                </code>
+                                            </div>
+
+                                            <div className="bg-white dark:bg-slate-900 p-2.5 rounded-lg border border-slate-100 dark:border-slate-800">
+                                                <span className="text-slate-400 block text-[10px] font-semibold mb-0.5">
+                                                    2. OAuth Redirect / Callback URL
+                                                </span>
+                                                <code className="block font-mono text-[11px] text-slate-700 dark:text-slate-300 break-all select-all bg-slate-50 dark:bg-slate-800 p-1 rounded border border-slate-200 dark:border-slate-700">
+                                                    {window.location.origin}/b24/oauth/callback
+                                                </code>
+                                            </div>
+                                        </div>
+                                    </div>
+
                                     {/* Real-time Diagnostics Drawer if verified */}
                                     {diagnosticResult && diagnosticResult.diagnostics && testingTenantId === null && (
                                         <div className="mt-4 p-4 rounded-xl bg-teal-50/70 dark:bg-teal-950/40 border border-teal-200 dark:border-teal-800 text-xs animate-in fade-in">
