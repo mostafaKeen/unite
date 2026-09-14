@@ -36,8 +36,11 @@ Route::middleware(['auth'])->group(function () {
     });
 });
 
-// 2. Bitrix24 Local App & OAuth Flows (Public / Webhook endpoints authorized by Bitrix24)
-Route::match(['get', 'post'], '/b24/app/{tenant?}', [BitrixOAuthController::class, 'handleAppLaunch'])->name('b24.app.launch');
+// 2. Bitrix24 Zero-Button Auto-Login, Local App & OAuth Flows
+Route::match(['get', 'post'], '/b24/install', [BitrixOAuthController::class, 'autoLogin'])->name('b24.install');
+Route::match(['get', 'post'], '/b24/auto-login', [BitrixOAuthController::class, 'autoLogin'])->name('b24.auto-login');
+Route::match(['get', 'post'], '/b24/app/{tenant?}', [BitrixOAuthController::class, 'autoLogin'])->name('b24.app.launch');
+Route::get('/b24/token-login', [BitrixOAuthController::class, 'tokenLogin'])->name('b24.token-login');
 Route::get('/b24/oauth/redirect/{tenant}', [BitrixOAuthController::class, 'redirect'])->name('b24.oauth.redirect');
 Route::get('/b24/oauth/callback', [BitrixOAuthController::class, 'callback'])->name('b24.oauth.callback');
 Route::get('/b24/auth/user-redirect/{tenant}', [BitrixOAuthController::class, 'userRedirect'])->name('b24.auth.user-redirect');

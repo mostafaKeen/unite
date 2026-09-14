@@ -11,8 +11,10 @@ use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -323,5 +325,204 @@ class BitrixOAuthController extends Controller
 
         return redirect()->intended('/dashboard')->with('status', "Signed in via Bitrix24 as {$user->name} ({$tenant->name}).");
     }
+
+    /**
+     * Automatic Zero-Button Bitrix24 Login & Installation Handshake.
+     * Called when the app is installed or opened in an iframe inside Bitrix24.
+     * Bitrix24 POSTs: DOMAIN, member_id, AUTH_ID, REFRESH_ID, AUTH_EXPIRES, PLACEMENT, PLACEMENT_OPTIONS
+     */
+    public function autoLogin(Request $request)
+    {
+        $domain       = $request->input('DOMAIN') ?: $request->input('domain');
+        $memberId     = $request->input('member_id');
+        $accessToken  = $request->input('AUTH_ID') ?: $request->input('access_token');
+        $refreshToken = $request->input('REFRESH_ID') ?: $request->input('refresh_token');
+        $expiresIn    = (int) ($request->input('AUTH_EXPIRES') ?: 3600);
+        $placement    = $request->input('PLACEMENT', 'DEFAULT');
+        $placementOptions = $request->input('PLACEMENT_OPTIONS');
+
+        Log::info('[Bitrix24 Auto-Login] Entry point hit', [
+            'method'    => $request->method(),
+            'domain'    => $domain,
+            'member_id' => $memberId,
+            'placement' => $placement,
+            'has_token' => !empty($accessToken),
+        ]);
+
+        // Check if user already has an active session matching this member_id
+        if (Auth::check() && $memberId && session('bitrix_member_id') === $memberId) {
+            Log::info('[Bitrix24 Auto-Login] Active session found, redirecting directly', [
+                'user_id' => Auth::id(),
+                'member_id' => $memberId,
+            ]);
+            return $this->redirectAfterBitrixAuth($placement, $placementOptions, session('tenant_id'));
+        }
+
+        if (!$domain || !$memberId || !$accessToken) {
+            if (!Auth::check()) {
+                return redirect()->route('login');
+            }
+            return redirect()->route('dashboard');
+        }
+
+        // 1. Fetch current Bitrix24 user details via user.current REST API
+        $b24User = $this->fetchBitrixCurrentUser($domain, $accessToken);
+        Log::info('[Bitrix24 Auto-Login] user.current result', [
+            'has_user' => !empty($b24User),
+            'email' => $b24User['EMAIL'] ?? null,
+            'id' => $b24User['ID'] ?? null,
+        ]);
+
+        // 2. Find or dynamically resolve/create Tenant for this Bitrix24 domain / member_id
+        $tenant = Tenant::where('b24_member_id', $memberId)
+            ->orWhere('b24_domain', 'like', "%{$domain}%")
+            ->first();
+
+        if (!$tenant) {
+            $companyName = ucfirst(explode('.', $domain)[0]);
+            $tenant = Tenant::create([
+                'name' => "{$companyName} Healthcare",
+                'slug' => Str::slug($companyName . '-' . Str::random(5)),
+                'status' => 'active',
+                'b24_domain' => $domain,
+                'b24_member_id' => $memberId,
+                'b24_access_token' => $accessToken,
+                'b24_refresh_token' => $refreshToken,
+                'b24_token_expires_at' => now()->addSeconds($expiresIn),
+                'b24_client_endpoint' => "https://{$domain}/rest/",
+            ]);
+            Log::info("[Bitrix24 Auto-Login] Created new Tenant record for portal: {$domain}");
+        } else {
+            $tenant->update([
+                'b24_domain' => $domain,
+                'b24_member_id' => $memberId,
+                'b24_access_token' => $accessToken,
+                'b24_refresh_token' => $refreshToken ?: $tenant->b24_refresh_token,
+                'b24_token_expires_at' => now()->addSeconds($expiresIn),
+                'b24_client_endpoint' => "https://{$domain}/rest/",
+            ]);
+        }
+
+        // 3. Register placements (Lead, Deal, Contact) automatically
+        try {
+            $this->bitrixService->registerIntegrationPlacements($tenant, $request->getSchemeAndHttpHost());
+        } catch (\Exception $e) {
+            Log::warning("[Bitrix24 Auto-Login] Placements registration non-blocking warning: " . $e->getMessage());
+        }
+
+        // 4. Resolve or create local user
+        $user = User::findOrCreateFromBitrix($tenant, $b24User ?: [
+            'ID' => 1,
+            'EMAIL' => "admin@{$tenant->slug}.local",
+            'NAME' => 'Bitrix',
+            'LAST_NAME' => 'User',
+            'ADMIN' => 1,
+        ]);
+
+        // 5. Issue short-lived one-time token in Cache (valid 5 minutes)
+        $token = Str::random(64);
+        Cache::put('bitrix_login_token_' . $token, [
+            'user_id' => $user->id,
+            'tenant_id' => $tenant->id,
+            'member_id' => $memberId,
+            'placement' => $placement,
+            'placement_options' => $placementOptions,
+        ], now()->addMinutes(5));
+
+        $redirectUrl = route('b24.token-login', [
+            'token' => $token,
+            'member_id' => $memberId,
+        ]);
+
+        // 6. Return install_finish Blade view (BX24.installFinish() then redirects to GET token-login route)
+        return response()->view('bitrix.install_finish', [
+            'redirectUrl' => $redirectUrl,
+            'domain' => $domain,
+        ]);
+    }
+
+    /**
+     * GET route: consumes one-time token and establishes iframe session cookies
+     */
+    public function tokenLogin(Request $request)
+    {
+        $token = $request->query('token');
+        $memberId = $request->query('member_id');
+
+        if (!$token) {
+            return redirect()->route('login')->with('error', 'Missing Bitrix24 login token.');
+        }
+
+        $cacheKey = 'bitrix_login_token_' . $token;
+        $data = Cache::get($cacheKey);
+
+        if (!$data) {
+            return redirect()->route('login')->with('error', 'Login session expired. Please reopen from Bitrix24.');
+        }
+
+        Cache::forget($cacheKey);
+
+        $user = User::find($data['user_id']);
+        if (!$user) {
+            return redirect()->route('login')->with('error', 'User account not found.');
+        }
+
+        Auth::login($user, true);
+        session([
+            'bitrix_member_id' => $data['member_id'],
+            'tenant_id' => $data['tenant_id'],
+        ]);
+        $request->session()->regenerate();
+
+        Log::info('[Bitrix24 Auto-Login] User authenticated via tokenLogin', [
+            'user_id' => $user->id,
+            'email' => $user->email,
+            'tenant_id' => $data['tenant_id'],
+        ]);
+
+        return $this->redirectAfterBitrixAuth($data['placement'] ?? 'DEFAULT', $data['placement_options'] ?? null, $data['tenant_id']);
+    }
+
+    private function redirectAfterBitrixAuth(string $placement, $placementOptions, ?string $tenantId)
+    {
+        // If loaded inside CRM detail tab, route to widget
+        if (in_array($placement, ['CRM_LEAD_DETAIL_TAB', 'CRM_DEAL_DETAIL_TAB', 'CRM_CONTACT_DETAIL_TAB']) && $tenantId) {
+            $dealId = null;
+            if ($placementOptions) {
+                $opts = is_array($placementOptions) ? $placementOptions : json_decode($placementOptions, true);
+                $dealId = $opts['ID'] ?? $opts['id'] ?? null;
+            }
+            $params = [];
+            if ($dealId) {
+                $params['deal_id'] = $dealId;
+            }
+            return redirect()->route('b24.widget.show', array_merge(['tenant' => $tenantId], $params));
+        }
+
+        return redirect()->intended('/dashboard');
+    }
+
+    private function fetchBitrixCurrentUser(string $domain, string $authToken): ?array
+    {
+        try {
+            $cleanDomain = preg_replace('#^https?://#', '', rtrim($domain, '/'));
+            $url = "https://{$cleanDomain}/rest/user.current";
+            $response = Http::timeout(10)->post($url, ['auth' => $authToken]);
+
+            if ($response->successful()) {
+                return $response->json('result') ?: null;
+            }
+
+            Log::warning('[Bitrix24 Auto-Login] user.current non-200', [
+                'status' => $response->status(),
+                'body'   => $response->body(),
+            ]);
+        } catch (\Exception $e) {
+            Log::error('[Bitrix24 Auto-Login] user.current exception: ' . $e->getMessage());
+        }
+
+        return null;
+    }
 }
+
 
