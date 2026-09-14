@@ -40,6 +40,8 @@ Route::middleware(['auth'])->group(function () {
 Route::match(['get', 'post'], '/b24/app/{tenant?}', [BitrixOAuthController::class, 'handleAppLaunch'])->name('b24.app.launch');
 Route::get('/b24/oauth/redirect/{tenant}', [BitrixOAuthController::class, 'redirect'])->name('b24.oauth.redirect');
 Route::get('/b24/oauth/callback', [BitrixOAuthController::class, 'callback'])->name('b24.oauth.callback');
+Route::get('/b24/auth/user-redirect/{tenant}', [BitrixOAuthController::class, 'userRedirect'])->name('b24.auth.user-redirect');
+Route::get('/b24/auth/user-callback', [BitrixOAuthController::class, 'userCallback'])->name('b24.auth.user-callback');
 Route::post('/api/b24/webhook/{tenant}', [BitrixOAuthController::class, 'handleWebhook'])
     ->middleware(['throttle:60,1'])
     ->name('b24.webhook');

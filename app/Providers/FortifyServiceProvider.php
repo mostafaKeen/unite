@@ -51,6 +51,9 @@ class FortifyServiceProvider extends ServiceProvider
         Fortify::loginView(fn (Request $request) => Inertia::render('auth/login', [
             'canResetPassword' => Features::enabled(Features::resetPasswords()),
             'status' => $request->session()->get('status'),
+            'tenants' => \App\Models\Tenant::where('status', 'active')
+                ->select(['id', 'name', 'b24_domain', 'slug'])
+                ->get(),
         ]));
 
         Fortify::resetPasswordView(fn (Request $request) => Inertia::render('auth/reset-password', [

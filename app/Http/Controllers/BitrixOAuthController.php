@@ -4,11 +4,13 @@ namespace App\Http\Controllers;
 
 use App\Models\Tenant;
 use App\Models\Appointment;
+use App\Models\User;
 use App\Services\Bitrix\BitrixService;
 use App\Services\Sync\AppointmentSyncService;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Inertia\Inertia;
@@ -225,4 +227,101 @@ class BitrixOAuthController extends Controller
 
         return response()->json(['success' => true]);
     }
+
+    /**
+     * Start User Sign-In OAuth flow with Bitrix24 for specific Tenant
+     */
+    public function userRedirect(Tenant $tenant): RedirectResponse
+    {
+        if (empty($tenant->b24_domain) || empty($tenant->b24_client_id)) {
+            return redirect()->route('login')->with('error', "Bitrix24 OAuth is not configured for facility: {$tenant->name}.");
+        }
+
+        $portal = preg_replace('#^https?://#', '', rtrim($tenant->b24_domain, '/'));
+        $redirectUri = route('b24.auth.user-callback');
+        $authorizeUrl = "https://{$portal}/oauth/authorize/?" . http_build_query([
+            'client_id' => $tenant->b24_client_id,
+            'state' => $tenant->id,
+            'redirect_uri' => $redirectUri,
+        ]);
+
+        Log::info("Initiating Bitrix24 User Sign-In OAuth for Tenant {$tenant->name}", [
+            'tenant_id' => $tenant->id,
+            'portal' => $portal,
+            'redirect_uri' => $redirectUri,
+        ]);
+
+        return redirect()->away($authorizeUrl);
+    }
+
+    /**
+     * Handle Bitrix24 User OAuth callback, detect user email & profile, and log user into Unite platform
+     */
+    public function userCallback(Request $request): RedirectResponse
+    {
+        $code = $request->query('code');
+        $tenantId = $request->query('state');
+        $domain = $request->query('domain');
+
+        Log::info("Received Bitrix24 User OAuth callback", [
+            'code' => $code ? 'RECEIVED' : 'MISSING',
+            'tenant_id' => $tenantId,
+            'domain' => $domain,
+        ]);
+
+        if (!$code || !$tenantId) {
+            return redirect()->route('login')->with('error', 'Invalid OAuth callback response from Bitrix24.');
+        }
+
+        $tenant = Tenant::find($tenantId);
+        if (!$tenant) {
+            return redirect()->route('login')->with('error', 'Specified facility tenant was not found.');
+        }
+
+        // Exchange code for user access token
+        $tokenRes = Http::get('https://oauth.bitrix.info/oauth/token/', [
+            'grant_type' => 'authorization_code',
+            'client_id' => $tenant->b24_client_id,
+            'client_secret' => $tenant->b24_client_secret,
+            'code' => $code,
+        ]);
+
+        $tokenData = $tokenRes->json();
+        $accessToken = $tokenData['access_token'] ?? null;
+
+        if (!$tokenRes->successful() || !$accessToken) {
+            Log::error("Bitrix24 User OAuth token exchange failed for tenant {$tenant->name}", ['response' => $tokenData]);
+            return redirect()->route('login')->with('error', 'Bitrix24 authentication token retrieval failed.');
+        }
+
+        // Fetch current user details from Bitrix24 REST API: user.current
+        $clientEndpoint = $tokenData['client_endpoint'] ?? "https://{$tenant->b24_domain}/rest/";
+        $userRes = Http::get(rtrim($clientEndpoint, '/') . '/user.current', [
+            'auth' => $accessToken,
+        ]);
+
+        $userData = $userRes->json();
+        $b24User = $userData['result'] ?? null;
+
+        if (!$userRes->successful() || empty($b24User)) {
+            Log::error("Failed to fetch Bitrix24 user profile via user.current API", ['response' => $userData]);
+            return redirect()->route('login')->with('error', 'Could not retrieve user profile from Bitrix24.');
+        }
+
+        Log::info("Fetched Bitrix24 user profile for login", [
+            'b24_user_id' => $b24User['ID'] ?? null,
+            'email' => $b24User['EMAIL'] ?? null,
+            'name' => ($b24User['NAME'] ?? '') . ' ' . ($b24User['LAST_NAME'] ?? ''),
+            'tenant' => $tenant->name,
+        ]);
+
+        // Find or create local tenant user (supports identical email across different tenants)
+        $user = User::findOrCreateFromBitrix($tenant, $b24User);
+
+        // Authenticate user in Laravel session
+        Auth::login($user, true);
+
+        return redirect()->intended('/dashboard')->with('status', "Signed in via Bitrix24 as {$user->name} ({$tenant->name}).");
+    }
 }
+
