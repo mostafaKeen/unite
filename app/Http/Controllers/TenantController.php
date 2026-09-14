@@ -184,4 +184,152 @@ class TenantController extends Controller
             'details' => $result,
         ]);
     }
+
+    /**
+     * Get items list for a tenant
+     */
+    public function getItems(Tenant $tenant): JsonResponse
+    {
+        return response()->json([
+            'success' => true,
+            'items' => $tenant->items_cache ?? [],
+        ]);
+    }
+
+    /**
+     * Add a new item to tenant's items_cache
+     */
+    public function storeItem(Request $request, Tenant $tenant): JsonResponse
+    {
+        $validated = $request->validate([
+            'item_description' => 'required|string|max:255',
+            'item_code' => 'required|integer',
+            'price' => 'required|numeric|min:0',
+            'average_time_in_minutes' => 'nullable|integer|min:0',
+            'clinic_id' => 'nullable|string',
+            'PackageItemDetails' => 'nullable|array',
+        ]);
+
+        $items = $tenant->items_cache ?? [];
+
+        // Check if item_code already exists
+        foreach ($items as $item) {
+            if ((int)($item['item_code'] ?? 0) === (int)$validated['item_code']) {
+                return response()->json([
+                    'success' => false,
+                    'message' => "Item with code #{$validated['item_code']} already exists. Please choose a unique code or edit the existing item."
+                ], 422);
+            }
+        }
+
+        $newItem = [
+            'item_code' => (int) $validated['item_code'],
+            'item_description' => trim($validated['item_description']),
+            'price' => (float) $validated['price'],
+            'average_time_in_minutes' => (int) ($validated['average_time_in_minutes'] ?? 20),
+            'clinic_id' => $validated['clinic_id'] ?: ($tenant->default_clinic_id ?: ($tenant->clinics_cache[0]['clinic_id'] ?? '')),
+            'PackageItemDetails' => $validated['PackageItemDetails'] ?? [],
+        ];
+
+        $items[] = $newItem;
+        $tenant->update(['items_cache' => $items]);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Medical service/item added successfully.',
+            'items' => $items,
+            'item' => $newItem,
+        ]);
+    }
+
+    /**
+     * Update an existing item in tenant's items_cache
+     */
+    public function updateItem(Request $request, Tenant $tenant, $itemCode): JsonResponse
+    {
+        $validated = $request->validate([
+            'item_description' => 'required|string|max:255',
+            'new_item_code' => 'nullable|integer',
+            'price' => 'required|numeric|min:0',
+            'average_time_in_minutes' => 'nullable|integer|min:0',
+            'clinic_id' => 'nullable|string',
+            'PackageItemDetails' => 'nullable|array',
+        ]);
+
+        $items = $tenant->items_cache ?? [];
+        $foundIndex = null;
+        $targetCode = (int) $itemCode;
+
+        foreach ($items as $index => $item) {
+            if ((int)($item['item_code'] ?? 0) === $targetCode) {
+                $foundIndex = $index;
+                break;
+            }
+        }
+
+        if ($foundIndex === null) {
+            return response()->json([
+                'success' => false,
+                'message' => "Item with code #{$itemCode} not found."
+            ], 404);
+        }
+
+        $newCode = isset($validated['new_item_code']) && $validated['new_item_code'] ? (int) $validated['new_item_code'] : $targetCode;
+
+        if ($newCode !== $targetCode) {
+            foreach ($items as $index => $item) {
+                if ($index !== $foundIndex && (int)($item['item_code'] ?? 0) === $newCode) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => "Another item already uses code #{$newCode}."
+                    ], 422);
+                }
+            }
+        }
+
+        $items[$foundIndex] = [
+            'item_code' => $newCode,
+            'item_description' => trim($validated['item_description']),
+            'price' => (float) $validated['price'],
+            'average_time_in_minutes' => (int) ($validated['average_time_in_minutes'] ?? 20),
+            'clinic_id' => $validated['clinic_id'] ?: ($items[$foundIndex]['clinic_id'] ?? ''),
+            'PackageItemDetails' => $validated['PackageItemDetails'] ?? ($items[$foundIndex]['PackageItemDetails'] ?? []),
+        ];
+
+        $tenant->update(['items_cache' => $items]);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Medical service/item updated successfully.',
+            'items' => $items,
+            'item' => $items[$foundIndex],
+        ]);
+    }
+
+    /**
+     * Delete an item from tenant's items_cache
+     */
+    public function destroyItem(Tenant $tenant, $itemCode): JsonResponse
+    {
+        $items = $tenant->items_cache ?? [];
+        $targetCode = (int) $itemCode;
+        $filtered = array_values(array_filter($items, function ($item) use ($targetCode) {
+            return (int)($item['item_code'] ?? 0) !== $targetCode;
+        }));
+
+        if (count($filtered) === count($items)) {
+            return response()->json([
+                'success' => false,
+                'message' => "Item with code #{$itemCode} not found."
+            ], 404);
+        }
+
+        $tenant->update(['items_cache' => $filtered]);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Medical service/item removed successfully.',
+            'items' => $filtered,
+        ]);
+    }
 }

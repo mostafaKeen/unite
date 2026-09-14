@@ -36,11 +36,25 @@ class UniteClient
     }
 
     /**
+     * Resolve the base URL for the tenant (supports production uniteuae.care)
+     */
+    public function getBaseUrl(Tenant $tenant): string
+    {
+        $baseUrl = $tenant->unite_base_url;
+        if ($tenant->unite_environment === 'production') {
+            if (empty($baseUrl) || str_contains($baseUrl, 'ucexternalapi-test.uniteemr.org')) {
+                return 'https://ucexternalapiprod.uniteuae.care';
+            }
+        }
+        return rtrim($baseUrl ?: 'https://ucexternalapi-test.uniteemr.org', '/');
+    }
+
+    /**
      * Request initial authorization token
      */
     public function authorize(Tenant $tenant): string
     {
-        $baseUrl = rtrim($tenant->unite_base_url ?: 'https://ucexternalapi-test.uniteemr.org', '/');
+        $baseUrl = $this->getBaseUrl($tenant);
         $appId = rawurlencode($tenant->unite_app_id ?? '');
         $appKey = rawurlencode($tenant->unite_app_key ?? '');
         $url = "{$baseUrl}/gateway/authorize?app_id={$appId}&app_key={$appKey}";
@@ -93,7 +107,7 @@ class UniteClient
      */
     public function refreshToken(Tenant $tenant): string
     {
-        $baseUrl = rtrim($tenant->unite_base_url ?: 'https://ucexternalapi-test.uniteemr.org', '/');
+        $baseUrl = $this->getBaseUrl($tenant);
         $url = "{$baseUrl}/gateway/refreshtoken";
 
         $response = Http::withHeaders([
@@ -142,7 +156,7 @@ class UniteClient
     }
 
     /**
-     * Fetch Clinics list
+     * Fetch Clinics list (calls /gateway/GetClinics)
      */
     public function getClinics(Tenant $tenant, bool $forceRefresh = false): array
     {
@@ -151,8 +165,8 @@ class UniteClient
         }
 
         $token = $this->ensureValidToken($tenant);
-        $baseUrl = rtrim($tenant->unite_base_url ?: 'https://ucexternalapi-test.uniteemr.org', '/');
-        $url = "{$baseUrl}/gateway/getclinics";
+        $baseUrl = $this->getBaseUrl($tenant);
+        $url = "{$baseUrl}/gateway/GetClinics";
 
         try {
             $response = Http::withHeaders([
@@ -169,6 +183,11 @@ class UniteClient
             }
         } catch (\Exception $e) {
             Log::warning("Unite getClinics network error: {$e->getMessage()}");
+        }
+
+        // If existing clinics exist in database, do not wipe with mock data
+        if (!empty($tenant->clinics_cache)) {
+            return $tenant->clinics_cache;
         }
 
         // Standard default mock dataset if sandbox endpoint is in offline/staging mode
@@ -198,7 +217,7 @@ class UniteClient
     }
 
     /**
-     * Fetch Doctors list
+     * Fetch Doctors list (calls /gateway/GetDoctors)
      */
     public function getDoctors(Tenant $tenant, bool $forceRefresh = false): array
     {
@@ -207,8 +226,8 @@ class UniteClient
         }
 
         $token = $this->ensureValidToken($tenant);
-        $baseUrl = rtrim($tenant->unite_base_url ?: 'https://ucexternalapi-test.uniteemr.org', '/');
-        $url = "{$baseUrl}/gateway/getdoctors";
+        $baseUrl = $this->getBaseUrl($tenant);
+        $url = "{$baseUrl}/gateway/GetDoctors";
 
         try {
             $response = Http::withHeaders([
@@ -225,6 +244,11 @@ class UniteClient
             }
         } catch (\Exception $e) {
             Log::warning("Unite getDoctors network error: {$e->getMessage()}");
+        }
+
+        // If existing doctors exist in database, do not wipe with mock data
+        if (!empty($tenant->doctors_cache)) {
+            return $tenant->doctors_cache;
         }
 
         $doctors = [
@@ -264,7 +288,7 @@ class UniteClient
     public function getAvailableSlots(Tenant $tenant, string $clinicId, string $doctorId, string $startDateFormatted): array
     {
         $token = $this->ensureValidToken($tenant);
-        $baseUrl = rtrim($tenant->unite_base_url ?: 'https://ucexternalapi-test.uniteemr.org', '/');
+        $baseUrl = $this->getBaseUrl($tenant);
         $url = "{$baseUrl}/gateway/available-slots?doctor_id={$doctorId}&clinic_id={$clinicId}&date={$startDateFormatted}";
 
         try {
@@ -319,8 +343,8 @@ class UniteClient
         }
 
         $token = $this->ensureValidToken($tenant);
-        $baseUrl = rtrim($tenant->unite_base_url ?: 'https://ucexternalapi-test.uniteemr.org', '/');
-        $url = "{$baseUrl}/gateway/getitemdetails";
+        $baseUrl = $this->getBaseUrl($tenant);
+        $url = "{$baseUrl}/gateway/GetItemDetails";
 
         try {
             $response = Http::withHeaders([
@@ -337,6 +361,11 @@ class UniteClient
             }
         } catch (\Exception $e) {
             Log::warning("Unite getItemDetails network error: {$e->getMessage()}");
+        }
+
+        // If existing items exist in database, do not wipe with mock data
+        if (!empty($tenant->items_cache)) {
+            return $tenant->items_cache;
         }
 
         $items = [

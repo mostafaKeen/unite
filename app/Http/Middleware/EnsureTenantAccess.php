@@ -26,8 +26,9 @@ class EnsureTenantAccess
 
         $tenantParam = $request->route('tenant');
         $tenantId = $tenantParam instanceof Tenant ? $tenantParam->id : $tenantParam;
+        $userTenantId = session('tenant_id') ?: $user->tenant_id;
 
-        if ($tenantId && $user->tenant_id !== $tenantId) {
+        if ($tenantId && $userTenantId !== $tenantId) {
             if ($request->expectsJson()) {
                 return response()->json([
                     'success' => false,

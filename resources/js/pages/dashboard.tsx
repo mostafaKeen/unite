@@ -6,7 +6,7 @@ import {
     RefreshCw, CheckCircle2, AlertCircle, Plus, ExternalLink, 
     Clock, Phone, DollarSign, Filter, Search, ChevronRight, 
     Sliders, Zap, ArrowUpRight, X, UserCheck, Users, Trash2, KeyRound,
-    Eye, EyeOff, Lock, Settings
+    Eye, EyeOff, Lock, Settings, Edit2, Tag, Package
 } from 'lucide-react';
 
 interface CurrentUser {
@@ -35,6 +35,7 @@ interface Tenant {
     default_clinic_id?: string;
     clinics_cache?: any[];
     doctors_cache?: any[];
+    items_cache?: any[];
     appointments_count?: number;
     sync_logs_count?: number;
 }
@@ -105,11 +106,30 @@ export default function Dashboard({
     recentLogs = [],
     tenantUsers = [],
 }: Props) {
-    const [activeTab, setActiveTab] = useState<'tenants' | 'appointments' | 'users' | 'logs'>('tenants');
+    const [activeTab, setActiveTab] = useState<'tenants' | 'appointments' | 'items' | 'users' | 'logs'>('tenants');
+    const [tenantsList, setTenantsList] = useState<Tenant[]>(tenants);
+    const [selectedTenantIdForItems, setSelectedTenantIdForItems] = useState<string>(
+        currentUser.tenant_id || tenants[0]?.id || ''
+    );
     const [testingTenantId, setTestingTenantId] = useState<string | null>(null);
     const [diagnosticResult, setDiagnosticResult] = useState<any | null>(null);
     const [showNewTenantModal, setShowNewTenantModal] = useState<boolean>(false);
     const [showNewUserModal, setShowNewUserModal] = useState<boolean>(false);
+
+    // Items management state
+    const [itemSearchTerm, setItemSearchTerm] = useState<string>('');
+    const [itemClinicFilter, setItemClinicFilter] = useState<string>('');
+    const [showItemModal, setShowItemModal] = useState<boolean>(false);
+    const [editingItem, setEditingItem] = useState<any | null>(null);
+    const [itemForm, setItemForm] = useState({
+        item_description: '',
+        item_code: '',
+        price: '',
+        average_time_in_minutes: '20',
+        clinic_id: '',
+    });
+    const [itemActionLoading, setItemActionLoading] = useState<boolean>(false);
+    const [syncingItemsLoading, setSyncingItemsLoading] = useState<boolean>(false);
 
     // Users list state
     const [usersList, setUsersList] = useState<UserItem[]>(tenantUsers);
@@ -299,6 +319,134 @@ export default function Dashboard({
             }
         } catch (e: any) {
             alert('Error: ' + e.message);
+        }
+    };
+
+    const currentItemsTenant = tenantsList.find(t => t.id === selectedTenantIdForItems) || tenantsList[0];
+    const currentTenantItems = currentItemsTenant?.items_cache || [];
+    const filteredItems = currentTenantItems.filter(item => {
+        const matchesSearch = !itemSearchTerm || 
+            item.item_description?.toLowerCase().includes(itemSearchTerm.toLowerCase()) ||
+            String(item.item_code).includes(itemSearchTerm);
+        const matchesClinic = !itemClinicFilter || item.clinic_id === itemClinicFilter;
+        return matchesSearch && matchesClinic;
+    });
+
+    const openAddItemModal = () => {
+        setEditingItem(null);
+        setItemForm({
+            item_description: '',
+            item_code: String(Math.floor(100 + Math.random() * 900)),
+            price: '250',
+            average_time_in_minutes: '20',
+            clinic_id: currentItemsTenant?.clinics_cache?.[0]?.clinic_id || '',
+        });
+        setShowItemModal(true);
+    };
+
+    const openEditItemModal = (item: any) => {
+        setEditingItem(item);
+        setItemForm({
+            item_description: item.item_description || '',
+            item_code: String(item.item_code || ''),
+            price: String(item.price || ''),
+            average_time_in_minutes: String(item.average_time_in_minutes || '20'),
+            clinic_id: item.clinic_id || '',
+        });
+        setShowItemModal(true);
+    };
+
+    const handleSaveItem = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!currentItemsTenant) return;
+        setItemActionLoading(true);
+
+        const isEdit = !!editingItem;
+        const url = isEdit 
+            ? `/tenants/${currentItemsTenant.id}/items/${editingItem.item_code}`
+            : `/tenants/${currentItemsTenant.id}/items`;
+        const method = isEdit ? 'PUT' : 'POST';
+
+        const payload = isEdit ? {
+            item_description: itemForm.item_description,
+            new_item_code: parseInt(itemForm.item_code, 10),
+            price: parseFloat(itemForm.price),
+            average_time_in_minutes: parseInt(itemForm.average_time_in_minutes, 10) || 20,
+            clinic_id: itemForm.clinic_id,
+        } : {
+            item_description: itemForm.item_description,
+            item_code: parseInt(itemForm.item_code, 10),
+            price: parseFloat(itemForm.price),
+            average_time_in_minutes: parseInt(itemForm.average_time_in_minutes, 10) || 20,
+            clinic_id: itemForm.clinic_id,
+        };
+
+        try {
+            const res = await fetch(url, {
+                method,
+                headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+                body: JSON.stringify(payload),
+            });
+            const data = await res.json();
+            if (data.success && data.items) {
+                setTenantsList(prev => prev.map(t => t.id === currentItemsTenant.id ? { ...t, items_cache: data.items } : t));
+                setShowItemModal(false);
+                setActionMessage({ type: 'success', text: data.message || 'Medical item saved successfully!' });
+            } else {
+                alert(data.message || 'Failed to save item.');
+            }
+        } catch (err: any) {
+            alert('Error saving item: ' + err.message);
+        } finally {
+            setItemActionLoading(false);
+        }
+    };
+
+    const handleDeleteItem = async (itemCode: number | string) => {
+        if (!currentItemsTenant) return;
+        if (!confirm(`Are you sure you want to remove item #${itemCode}? It will no longer be available in the CRM booking widget.`)) return;
+
+        try {
+            const res = await fetch(`/tenants/${currentItemsTenant.id}/items/${itemCode}`, {
+                method: 'DELETE',
+                headers: { 'Accept': 'application/json' },
+            });
+            const data = await res.json();
+            if (data.success && data.items) {
+                setTenantsList(prev => prev.map(t => t.id === currentItemsTenant.id ? { ...t, items_cache: data.items } : t));
+                setActionMessage({ type: 'success', text: data.message || 'Item removed.' });
+            } else {
+                alert(data.message || 'Failed to delete item.');
+            }
+        } catch (e: any) {
+            alert('Error deleting item: ' + e.message);
+        }
+    };
+
+    const handleSyncItemsFromUnite = async () => {
+        if (!currentItemsTenant) return;
+        setSyncingItemsLoading(true);
+        try {
+            const res = await fetch(`/tenants/${currentItemsTenant.id}/sync-directories`, {
+                method: 'POST',
+                headers: { 'Accept': 'application/json' },
+            });
+            const data = await res.json();
+            if (data.success && data.data) {
+                setTenantsList(prev => prev.map(t => t.id === currentItemsTenant.id ? { 
+                    ...t, 
+                    items_cache: data.data.items,
+                    clinics_cache: data.data.clinics,
+                    doctors_cache: data.data.doctors
+                } : t));
+                setActionMessage({ type: 'success', text: 'Directories & services updated from Unite EMR API!' });
+            } else {
+                alert(data.message || 'Failed to sync directories.');
+            }
+        } catch (e: any) {
+            alert('Error syncing from Unite: ' + e.message);
+        } finally {
+            setSyncingItemsLoading(false);
         }
     };
 
@@ -501,6 +649,18 @@ export default function Dashboard({
                     </button>
 
                     <button
+                        onClick={() => setActiveTab('items')}
+                        className={`pb-2 px-1 flex items-center gap-2 border-b-2 transition-all ${
+                            activeTab === 'items'
+                                ? 'border-[#00a5b5] text-[#00a5b5]'
+                                : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+                        }`}
+                    >
+                        <Stethoscope className="w-4 h-4" />
+                        Services & Items ({currentTenantItems.length})
+                    </button>
+
+                    <button
                         onClick={() => setActiveTab('users')}
                         className={`pb-2 px-1 flex items-center gap-2 border-b-2 transition-all ${
                             activeTab === 'users'
@@ -528,7 +688,7 @@ export default function Dashboard({
                 {/* Tab 1: Company Tenants */}
                 {activeTab === 'tenants' && (
                     <div className="space-y-4">
-                        {tenants.map((t) => {
+                        {tenantsList.map((t) => {
                             const isTesting = testingTenantId === t.id;
                             const clinicsCount = t.clinics_cache?.length || 0;
                             const doctorsCount = t.doctors_cache?.length || 0;
@@ -593,11 +753,26 @@ export default function Dashboard({
                                                     <strong className="text-slate-700 dark:text-slate-300">Doctors:</strong>{' '}
                                                     {doctorsCount} Registered
                                                 </span>
+                                                <span>
+                                                    <strong className="text-slate-700 dark:text-slate-300">Services & Items:</strong>{' '}
+                                                    {t.items_cache?.length || 0} Configured
+                                                </span>
                                             </div>
                                         </div>
 
                                         {/* Action buttons */}
                                         <div className="flex flex-wrap items-center gap-2">
+                                            <button
+                                                onClick={() => {
+                                                    setSelectedTenantIdForItems(t.id);
+                                                    setActiveTab('items');
+                                                }}
+                                                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold text-slate-700 dark:text-slate-200 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 transition-colors"
+                                            >
+                                                <Stethoscope className="w-3.5 h-3.5 text-[#00a5b5]" />
+                                                Manage Services ({t.items_cache?.length || 0})
+                                            </button>
+
                                             {/* Configure / Edit Tenant credentials button (Super Admin) */}
                                             {currentUser.can_manage_tenants && (
                                                 <button
@@ -796,6 +971,179 @@ export default function Dashboard({
                                                     ) : (
                                                         <span className="text-slate-400 text-[11px]">Pending</span>
                                                     )}
+                                                </td>
+                                            </tr>
+                                        ))
+                                    )}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                )}
+
+                {/* Tab: Medical Services & Items Management */}
+                {activeTab === 'items' && (
+                    <div className="bg-white dark:bg-slate-900 border border-teal-100 dark:border-teal-900/40 rounded-2xl overflow-hidden shadow-sm">
+                        {/* Header bar */}
+                        <div className="p-5 border-b border-slate-100 dark:border-slate-800 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                            <div>
+                                <div className="flex items-center gap-2.5">
+                                    <div className="p-2 rounded-xl bg-teal-50 dark:bg-teal-950/60 text-[#00a5b5]">
+                                        <Stethoscope className="w-5 h-5" />
+                                    </div>
+                                    <div>
+                                        <h3 className="text-base font-bold text-slate-900 dark:text-slate-100">
+                                            Medical Services, Procedures & Items
+                                        </h3>
+                                        <p className="text-xs text-slate-400 mt-0.5">
+                                            Manage the clinical procedures, consultation types, and prices displayed in the Bitrix24 booking widget and invoices.
+                                        </p>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div className="flex flex-wrap items-center gap-2.5">
+                                {currentUser.can_manage_tenants && tenantsList.length > 1 && (
+                                    <div className="flex items-center gap-2">
+                                        <label className="text-xs font-semibold text-slate-500">Company:</label>
+                                        <select
+                                            value={selectedTenantIdForItems}
+                                            onChange={(e) => setSelectedTenantIdForItems(e.target.value)}
+                                            className="px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-semibold focus:ring-2 focus:ring-[#00a5b5] focus:outline-none"
+                                        >
+                                            {tenantsList.map(t => (
+                                                <option key={t.id} value={t.id}>{t.name}</option>
+                                            ))}
+                                        </select>
+                                    </div>
+                                )}
+
+                                <button
+                                    onClick={handleSyncItemsFromUnite}
+                                    disabled={syncingItemsLoading || !currentItemsTenant}
+                                    className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold text-slate-700 dark:text-slate-200 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 transition-colors disabled:opacity-50"
+                                >
+                                    <RefreshCw className={`w-3.5 h-3.5 ${syncingItemsLoading ? 'animate-spin text-[#00a5b5]' : 'text-slate-500'}`} />
+                                    {syncingItemsLoading ? 'Syncing...' : 'Sync from Unite API'}
+                                </button>
+
+                                <button
+                                    onClick={openAddItemModal}
+                                    className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold text-white bg-[#00a5b5] hover:bg-[#008f9c] shadow-md shadow-[#00a5b5]/20 transition-all"
+                                >
+                                    <Plus className="w-3.5 h-3.5" />
+                                    Add Service / Item
+                                </button>
+                            </div>
+                        </div>
+
+                        {/* Search & Filter Bar */}
+                        <div className="p-4 bg-slate-50/50 dark:bg-slate-800/30 border-b border-slate-100 dark:border-slate-800 flex flex-col sm:flex-row items-center justify-between gap-3">
+                            <div className="relative w-full sm:w-80">
+                                <Search className="w-4 h-4 absolute left-3 top-2.5 text-slate-400" />
+                                <input
+                                    type="text"
+                                    placeholder="Search by procedure name or code..."
+                                    value={itemSearchTerm}
+                                    onChange={(e) => setItemSearchTerm(e.target.value)}
+                                    className="w-full pl-9 pr-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs focus:ring-2 focus:ring-[#00a5b5] focus:outline-none"
+                                />
+                            </div>
+
+                            <div className="flex items-center gap-3 w-full sm:w-auto">
+                                <select
+                                    value={itemClinicFilter}
+                                    onChange={(e) => setItemClinicFilter(e.target.value)}
+                                    className="px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs text-slate-600 dark:text-slate-300"
+                                >
+                                    <option value="">All Facilities / Clinics</option>
+                                    {currentItemsTenant?.clinics_cache?.map((c: any) => (
+                                        <option key={c.clinic_id} value={c.clinic_id}>{c.name || c.clinic_id}</option>
+                                    ))}
+                                </select>
+                                <span className="text-xs text-slate-400 whitespace-nowrap">
+                                    Showing <strong>{filteredItems.length}</strong> of <strong>{currentTenantItems.length}</strong> items
+                                </span>
+                            </div>
+                        </div>
+
+                        {/* Table of items */}
+                        <div className="overflow-x-auto">
+                            <table className="w-full text-left text-xs">
+                                <thead className="bg-slate-50/75 dark:bg-slate-800/50 text-slate-500 border-b border-slate-100 dark:border-slate-800 uppercase font-semibold">
+                                    <tr>
+                                        <th className="py-3 px-4">Code</th>
+                                        <th className="py-3 px-4">Service / Procedure Description</th>
+                                        <th className="py-3 px-4">Standard Price</th>
+                                        <th className="py-3 px-4">Duration</th>
+                                        <th className="py-3 px-4">Facility / Clinic</th>
+                                        <th className="py-3 px-4 text-right">Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-slate-100 dark:divide-slate-800 font-medium">
+                                    {filteredItems.length === 0 ? (
+                                        <tr>
+                                            <td colSpan={6} className="py-12 text-center text-slate-400">
+                                                <Stethoscope className="w-8 h-8 text-slate-300 mx-auto mb-2" />
+                                                <p className="font-semibold text-slate-600 dark:text-slate-400">No medical services found.</p>
+                                                <p className="text-xs text-slate-400 mt-1">
+                                                    Click <strong>Add Service / Item</strong> to register your first clinical service, or sync from Unite EMR.
+                                                </p>
+                                            </td>
+                                        </tr>
+                                    ) : (
+                                        filteredItems.map((item, idx) => (
+                                            <tr key={item.item_code || idx} className="hover:bg-teal-50/30 dark:hover:bg-teal-950/20 transition-colors">
+                                                <td className="py-3.5 px-4">
+                                                    <span className="px-2.5 py-1 rounded-lg text-xs font-mono font-bold bg-teal-50 dark:bg-teal-950/60 text-[#00a5b5] border border-teal-200/60 dark:border-teal-800/60">
+                                                        #{item.item_code}
+                                                    </span>
+                                                </td>
+                                                <td className="py-3.5 px-4">
+                                                    <div className="font-bold text-slate-800 dark:text-slate-200">
+                                                        {item.item_description}
+                                                    </div>
+                                                    {item.PackageItemDetails && item.PackageItemDetails.length > 0 && (
+                                                        <div className="flex flex-wrap gap-1 mt-1">
+                                                            {item.PackageItemDetails.map((pkg: any, pIdx: number) => (
+                                                                <span key={pIdx} className="px-1.5 py-0.5 rounded text-[10px] bg-slate-100 dark:bg-slate-800 text-slate-500">
+                                                                    CPT: {pkg.cpt_code} - {pkg.item_description}
+                                                                </span>
+                                                            ))}
+                                                        </div>
+                                                    )}
+                                                </td>
+                                                <td className="py-3.5 px-4 font-bold text-slate-900 dark:text-slate-100">
+                                                    AED {Number(item.price).toFixed(2)}
+                                                </td>
+                                                <td className="py-3.5 px-4 text-slate-600 dark:text-slate-400">
+                                                    <span className="flex items-center gap-1">
+                                                        <Clock className="w-3.5 h-3.5 text-slate-400" />
+                                                        {item.average_time_in_minutes || 20} min
+                                                    </span>
+                                                </td>
+                                                <td className="py-3.5 px-4">
+                                                    <span className="px-2 py-0.5 rounded text-[11px] font-semibold bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
+                                                        {item.clinic_id || 'All Clinics'}
+                                                    </span>
+                                                </td>
+                                                <td className="py-3.5 px-4 text-right">
+                                                    <div className="inline-flex items-center gap-1.5">
+                                                        <button
+                                                            onClick={() => openEditItemModal(item)}
+                                                            className="p-1.5 rounded-lg text-slate-500 hover:text-[#00a5b5] hover:bg-teal-50 dark:hover:bg-teal-950/60 transition-colors"
+                                                            title="Edit Service"
+                                                        >
+                                                            <Edit2 className="w-3.5 h-3.5" />
+                                                        </button>
+                                                        <button
+                                                            onClick={() => handleDeleteItem(item.item_code)}
+                                                            className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition-colors"
+                                                            title="Delete Service"
+                                                        >
+                                                            <Trash2 className="w-3.5 h-3.5" />
+                                                        </button>
+                                                    </div>
                                                 </td>
                                             </tr>
                                         ))
@@ -1430,6 +1778,133 @@ export default function Dashboard({
                                 >
                                     {userLoading ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
                                     Create User
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            )}
+
+            {/* Modal: Add / Edit Medical Service & Item */}
+            {showItemModal && currentItemsTenant && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+                    <div className="bg-white dark:bg-slate-900 border border-teal-100 dark:border-teal-900 rounded-2xl max-w-md w-full p-6 shadow-2xl animate-in fade-in zoom-in-95">
+                        <div className="flex items-center justify-between pb-4 border-b border-slate-100 dark:border-slate-800 mb-5">
+                            <div className="flex items-center gap-2.5">
+                                <div className="p-2 rounded-xl bg-teal-50 dark:bg-teal-950 text-[#00a5b5]">
+                                    <Stethoscope className="w-5 h-5" />
+                                </div>
+                                <div>
+                                    <h3 className="text-base font-bold text-slate-900 dark:text-slate-100">
+                                        {editingItem ? 'Edit Medical Service' : 'Add Medical Service'}
+                                    </h3>
+                                    <p className="text-[11px] text-slate-400 font-medium">
+                                        {currentItemsTenant.name}
+                                    </p>
+                                </div>
+                            </div>
+                            <button onClick={() => setShowItemModal(false)} className="text-slate-400 hover:text-slate-600">
+                                <X className="w-4 h-4" />
+                            </button>
+                        </div>
+
+                        <form onSubmit={handleSaveItem} className="space-y-4 text-xs">
+                            <div>
+                                <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                                    Service / Procedure Name <span className="text-rose-500">*</span>
+                                </label>
+                                <input
+                                    type="text"
+                                    required
+                                    placeholder="e.g. Cardiology Specialist Consultation"
+                                    value={itemForm.item_description}
+                                    onChange={(e) => setItemForm({ ...itemForm, item_description: e.target.value })}
+                                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs focus:ring-2 focus:ring-[#00a5b5] focus:outline-none"
+                                />
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-3">
+                                <div>
+                                    <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                                        Item Code <span className="text-rose-500">*</span>
+                                    </label>
+                                    <input
+                                        type="number"
+                                        required
+                                        placeholder="101"
+                                        value={itemForm.item_code}
+                                        onChange={(e) => setItemForm({ ...itemForm, item_code: e.target.value })}
+                                        className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-mono focus:ring-2 focus:ring-[#00a5b5] focus:outline-none"
+                                    />
+                                </div>
+
+                                <div>
+                                    <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                                        Price (AED) <span className="text-rose-500">*</span>
+                                    </label>
+                                    <input
+                                        type="number"
+                                        step="0.01"
+                                        min="0"
+                                        required
+                                        placeholder="250.00"
+                                        value={itemForm.price}
+                                        onChange={(e) => setItemForm({ ...itemForm, price: e.target.value })}
+                                        className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-semibold focus:ring-2 focus:ring-[#00a5b5] focus:outline-none"
+                                    />
+                                </div>
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-3">
+                                <div>
+                                    <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                                        Duration (Minutes)
+                                    </label>
+                                    <input
+                                        type="number"
+                                        min="5"
+                                        step="5"
+                                        placeholder="20"
+                                        value={itemForm.average_time_in_minutes}
+                                        onChange={(e) => setItemForm({ ...itemForm, average_time_in_minutes: e.target.value })}
+                                        className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs focus:ring-2 focus:ring-[#00a5b5] focus:outline-none"
+                                    />
+                                </div>
+
+                                <div>
+                                    <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                                        Clinic Facility
+                                    </label>
+                                    <select
+                                        value={itemForm.clinic_id}
+                                        onChange={(e) => setItemForm({ ...itemForm, clinic_id: e.target.value })}
+                                        className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs"
+                                    >
+                                        <option value="">All Clinics</option>
+                                        {currentItemsTenant.clinics_cache?.map((c: any) => (
+                                            <option key={c.clinic_id} value={c.clinic_id}>
+                                                {c.name || c.clinic_id}
+                                            </option>
+                                        ))}
+                                    </select>
+                                </div>
+                            </div>
+
+                            <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-100 dark:border-slate-800">
+                                <button
+                                    type="button"
+                                    onClick={() => setShowItemModal(false)}
+                                    className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    type="submit"
+                                    disabled={itemActionLoading}
+                                    className="px-5 py-2.5 rounded-xl text-xs font-bold text-white bg-[#00a5b5] hover:bg-[#008f9c] flex items-center gap-1.5 shadow-md shadow-[#00a5b5]/20 disabled:opacity-50"
+                                >
+                                    {itemActionLoading ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
+                                    {editingItem ? 'Update Service' : 'Save Service'}
                                 </button>
                             </div>
                         </form>

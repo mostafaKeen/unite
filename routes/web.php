@@ -39,10 +39,14 @@ Route::middleware(['auth'])->group(function () {
         Route::post('/{tenant}/bind-placements', [TenantController::class, 'registerBitrixPlacements'])->name('tenants.bind-placements');
     });
 
-    // Tenant testing & sync (Super Admin or Tenant Admin for their assigned tenant)
-    Route::prefix('tenants/{tenant}')->middleware([EnsureTenantAccess::class, 'throttle:15,1'])->group(function () {
+    // Tenant testing, sync & item management (Super Admin or Tenant Admin for their assigned tenant)
+    Route::prefix('tenants/{tenant}')->middleware([EnsureTenantAccess::class, 'throttle:60,1'])->group(function () {
         Route::post('/test-unite', [TenantController::class, 'testUniteConnection'])->name('tenants.test-unite');
         Route::post('/sync-directories', [TenantController::class, 'syncDirectories'])->name('tenants.sync-directories');
+        Route::get('/items', [TenantController::class, 'getItems'])->name('tenants.items.index');
+        Route::post('/items', [TenantController::class, 'storeItem'])->name('tenants.items.store');
+        Route::put('/items/{itemCode}', [TenantController::class, 'updateItem'])->name('tenants.items.update');
+        Route::delete('/items/{itemCode}', [TenantController::class, 'destroyItem'])->name('tenants.items.destroy');
     });
 
     // User Management (Super Admin manages all; Tenant Admin manages their tenant's users)
