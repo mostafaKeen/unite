@@ -95,7 +95,8 @@ export default function DealTabWidget({
         return `${dd}-${mm}-${yyyy}`;
     });
     const [availableSlots, setAvailableSlots] = useState<Record<string, string[]>>({});
-    const [selectedTimeSlot, setSelectedTimeSlot] = useState<string>('');
+    const [selectedSlotDate, setSelectedSlotDate] = useState<string>('');
+    const [selectedSlotTime, setSelectedSlotTime] = useState<string>('');
     const [loadingSlots, setLoadingSlots] = useState<boolean>(false);
     const [bookingLoading, setBookingLoading] = useState<boolean>(false);
     const [statusLoading, setStatusLoading] = useState<boolean>(false);
@@ -184,9 +185,19 @@ export default function DealTabWidget({
             if (json.success && json.data) {
                 setAvailableSlots(json.data);
                 // Set first slot if available
-                const firstDate = Object.keys(json.data)[0];
-                if (firstDate && json.data[firstDate]?.length > 0) {
-                    setSelectedTimeSlot(json.data[firstDate][0]);
+                const dates = Object.keys(json.data);
+                if (dates.length > 0) {
+                    const firstDate = dates[0];
+                    if (json.data[firstDate]?.length > 0) {
+                        setSelectedSlotDate(firstDate);
+                        setSelectedSlotTime(json.data[firstDate][0]);
+                    } else {
+                        setSelectedSlotDate('');
+                        setSelectedSlotTime('');
+                    }
+                } else {
+                    setSelectedSlotDate('');
+                    setSelectedSlotTime('');
                 }
             }
         } catch (e) {
@@ -205,6 +216,9 @@ export default function DealTabWidget({
         const selectedClinic = clinics.find(c => c.clinic_id === selectedClinicId);
         const selectedDoctor = doctors.find(d => d.doctor_id === selectedDoctorId);
 
+        const appointmentDate = selectedSlotDate ? formatToDdMmYyyy(selectedSlotDate) : selectedDate;
+        const appointmentTime = selectedSlotTime ? convertTo24Hour(selectedSlotTime) : '10:00';
+
         const payload = {
             b24_deal_id: dealId ? String(dealId) : null,
             b24_contact_id: dealContext?.contact_id ? String(dealContext.contact_id) : null,
@@ -212,7 +226,7 @@ export default function DealTabWidget({
             clinicname: selectedClinic?.name || selectedClinicId,
             doctorid: selectedDoctorId,
             doctorname: selectedDoctor?.name || selectedDoctorId,
-            startdatetime: `${selectedDate} ${selectedTimeSlot ? convertTo24Hour(selectedTimeSlot) : '10:00'}`,
+            startdatetime: `${appointmentDate} ${appointmentTime}`,
             duration: '30',
             itemcode: selectedItemCodes,
             ...patientData,
@@ -296,13 +310,14 @@ export default function DealTabWidget({
         const totalVat = invoiceItems.reduce((acc, curr) => acc + curr.vat_amt, 0);
         const totalNet = totalGross + totalVat;
 
+        const invoiceDate = selectedSlotDate ? formatToDdMmYyyy(selectedSlotDate) : selectedDate;
         const payload = {
             invoiceDetails: invoiceItems,
             invoicePayments: [
                 {
                     payment_mode: invoicePaymentMode,
                     paid_amt: totalNet,
-                    paid_date: `${selectedDate} 11:30`,
+                    paid_date: `${invoiceDate} 11:30`,
                     payment_reference_number: invoiceRefNum,
                     bank_name: 'ENBD Dubai',
                     transaction_card_type: 'VISA',
@@ -329,12 +344,55 @@ export default function DealTabWidget({
         }
     };
 
+    const formatDisplayDate = (dateStr: string) => {
+        try {
+            const parts = dateStr.split('-');
+            if (parts.length === 3 && parts[0].length === 4) {
+                // YYYY, MM, DD
+                const d = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
+                return d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
+            }
+            return new Date(dateStr).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
+        } catch {
+            return dateStr;
+        }
+    };
+
+    const formatToDdMmYyyy = (dateStr: string) => {
+        if (!dateStr) return '';
+        const parts = dateStr.split('-');
+        if (parts.length === 3) {
+            if (parts[0].length === 4) {
+                // YYYY-MM-DD -> DD-MM-YYYY
+                return `${parts[2].padStart(2, '0')}-${parts[1].padStart(2, '0')}-${parts[0]}`;
+            }
+            if (parts[2].length === 4) {
+                // Already DD-MM-YYYY
+                return dateStr;
+            }
+        }
+        const d = new Date(dateStr);
+        if (!isNaN(d.getTime())) {
+            const dd = String(d.getDate()).padStart(2, '0');
+            const mm = String(d.getMonth() + 1).padStart(2, '0');
+            const yyyy = d.getFullYear();
+            return `${dd}-${mm}-${yyyy}`;
+        }
+        return dateStr;
+    };
+
     const convertTo24Hour = (timeStr: string) => {
-        const [time, modifier] = timeStr.split(' ');
+        if (!timeStr) return '10:00';
+        const parts = timeStr.trim().split(/\s+/);
+        if (parts.length === 1) {
+            return parts[0];
+        }
+        const [time, modifier] = parts;
         let [hours, minutes] = time.split(':');
-        if (hours === '12') hours = '00';
-        if (modifier === 'PM') hours = String(parseInt(hours, 10) + 12);
-        return `${hours.padStart(2, '0')}:${minutes}`;
+        let h = parseInt(hours, 10);
+        if (modifier && modifier.toUpperCase() === 'PM' && h < 12) h += 12;
+        if (modifier && modifier.toUpperCase() === 'AM' && h === 12) h = 0;
+        return `${String(h).padStart(2, '0')}:${minutes || '00'}`;
     };
 
     const calculateSubtotal = () => {
@@ -630,19 +688,22 @@ export default function DealTabWidget({
                                             <div className="flex items-center justify-between mb-2.5">
                                                 <span className="text-xs font-bold text-slate-700 dark:text-slate-200 flex items-center gap-1.5">
                                                     <Calendar className="w-3.5 h-3.5 text-[#00a5b5]" />
-                                                    {new Date(dateKey).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })}
+                                                    {formatDisplayDate(dateKey)}
                                                 </span>
                                                 <span className="text-[10px] text-slate-400 font-medium">{slots.length} slots available</span>
                                             </div>
 
                                             <div className="flex flex-wrap gap-2">
                                                 {slots.map((slot) => {
-                                                    const isSelected = selectedTimeSlot === slot;
+                                                    const isSelected = selectedSlotDate === dateKey && selectedSlotTime === slot;
                                                     return (
                                                         <button
-                                                            key={slot}
+                                                            key={`${dateKey}-${slot}`}
                                                             type="button"
-                                                            onClick={() => setSelectedTimeSlot(slot)}
+                                                            onClick={() => {
+                                                                setSelectedSlotDate(dateKey);
+                                                                setSelectedSlotTime(slot);
+                                                            }}
                                                             className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
                                                                 isSelected
                                                                     ? 'bg-[#00a5b5] text-white shadow-sm shadow-[#00a5b5]/30 ring-2 ring-[#00a5b5]/50'
@@ -656,6 +717,20 @@ export default function DealTabWidget({
                                             </div>
                                         </div>
                                     ))
+                                )}
+
+                                {selectedSlotDate && selectedSlotTime && (
+                                    <div className="mt-4 p-3.5 rounded-xl bg-teal-50 dark:bg-teal-950/50 border border-teal-200 dark:border-teal-800/60 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                                        <div className="flex items-center gap-2.5 text-xs text-teal-900 dark:text-teal-200 font-medium">
+                                            <CheckCircle2 className="w-4 h-4 text-[#00a5b5] shrink-0" />
+                                            <span>
+                                                Selected Appointment: <strong className="font-semibold">{formatDisplayDate(selectedSlotDate)}</strong> at <strong className="text-[#00a5b5] font-bold font-mono">{selectedSlotTime}</strong>
+                                            </span>
+                                        </div>
+                                        <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-[#00a5b5] text-white shadow-sm w-fit">
+                                            Ready to Book
+                                        </span>
+                                    </div>
                                 )}
                             </div>
                         )}
@@ -895,7 +970,7 @@ export default function DealTabWidget({
 
                         <button
                             type="submit"
-                            disabled={bookingLoading || !selectedTimeSlot}
+                            disabled={bookingLoading || !selectedSlotDate || !selectedSlotTime}
                             className="px-6 py-3 rounded-xl text-sm font-bold text-white bg-[#00a5b5] hover:bg-[#008f9c] disabled:opacity-50 shadow-lg shadow-[#00a5b5]/30 flex items-center gap-2 transition-all"
                         >
                             {bookingLoading ? (
