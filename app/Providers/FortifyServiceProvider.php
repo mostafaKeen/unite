@@ -49,39 +49,23 @@ class FortifyServiceProvider extends ServiceProvider
     private function configureViews(): void
     {
         Fortify::loginView(function (Request $request) {
-            // 1. If Bitrix24 parameters are provided in request, execute autoLogin directly
+            // 1. If Bitrix24 parameters are provided, execute autoLogin directly
             if ($request->has('AUTH_ID') || $request->has('DOMAIN') || $request->has('member_id')) {
                 return app(\App\Http\Controllers\BitrixOAuthController::class)->autoLogin($request);
             }
 
-            // 2. If already authenticated, redirect straight to dashboard
+            // 2. If already authenticated, go directly to dashboard
             if (\Illuminate\Support\Facades\Auth::check()) {
                 return redirect()->route('dashboard');
             }
 
-            // 3. Auto-authenticate into the tenant facility without showing manual login page
-            $tenantId = session('tenant_id');
-            $tenant = $tenantId ? \App\Models\Tenant::find($tenantId) : \App\Models\Tenant::first();
-            if ($tenant) {
-                $user = \App\Models\User::where('tenant_id', $tenant->id)->first();
-                if (!$user) {
-                    $user = \App\Models\User::create([
-                        'tenant_id' => $tenant->id,
-                        'name' => "Admin ({$tenant->name})",
-                        'email' => "admin@{$tenant->slug}.local",
-                        'role' => \App\Models\User::ROLE_TENANT_ADMIN,
-                        'password' => bcrypt(\Illuminate\Support\Str::random(32)),
-                        'email_verified_at' => now(),
-                    ]);
-                }
-                \Illuminate\Support\Facades\Auth::login($user, true);
-                session(['tenant_id' => $tenant->id]);
-                return redirect()->route('dashboard');
-            }
-
+            // 3. Render clean login view without circular redirection
             return Inertia::render('auth/login', [
                 'canResetPassword' => Features::enabled(Features::resetPasswords()),
                 'status' => $request->session()->get('status'),
+                'tenants' => \App\Models\Tenant::where('status', 'active')
+                    ->select(['id', 'name', 'b24_domain', 'slug'])
+                    ->get(),
             ]);
         });
 

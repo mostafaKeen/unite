@@ -14,35 +14,23 @@ Route::match(['get', 'post'], '/', function (\Illuminate\Http\Request $request) 
     if ($request->has('AUTH_ID') || $request->has('DOMAIN') || $request->has('member_id')) {
         return app(\App\Http\Controllers\BitrixOAuthController::class)->autoLogin($request);
     }
-    if (!\Illuminate\Support\Facades\Auth::check()) {
-        $tenantId = session('tenant_id');
-        $tenant = $tenantId ? \App\Models\Tenant::find($tenantId) : \App\Models\Tenant::first();
-        if ($tenant) {
-            $user = \App\Models\User::where('tenant_id', $tenant->id)->first();
-            if (!$user) {
-                $user = \App\Models\User::create([
-                    'tenant_id' => $tenant->id,
-                    'name' => "Admin ({$tenant->name})",
-                    'email' => "admin@{$tenant->slug}.local",
-                    'role' => \App\Models\User::ROLE_TENANT_ADMIN,
-                    'password' => bcrypt(\Illuminate\Support\Str::random(32)),
-                    'email_verified_at' => now(),
-                ]);
-            }
-            \Illuminate\Support\Facades\Auth::login($user, true);
-            session(['tenant_id' => $tenant->id]);
-        }
+    if (\Illuminate\Support\Facades\Auth::check()) {
+        return app(\App\Http\Controllers\DashboardController::class)->index($request);
     }
-    return app(\App\Http\Controllers\DashboardController::class)->index($request);
+    return redirect()->route('login');
 })->name('home');
 
+Route::match(['get', 'post'], '/dashboard', function (\Illuminate\Http\Request $request) {
+    if ($request->has('AUTH_ID') || $request->has('DOMAIN') || $request->has('member_id')) {
+        return app(\App\Http\Controllers\BitrixOAuthController::class)->autoLogin($request);
+    }
+    if (!\Illuminate\Support\Facades\Auth::check()) {
+        return redirect()->route('login');
+    }
+    return app(\App\Http\Controllers\DashboardController::class)->index($request);
+})->name('dashboard');
+
 Route::middleware(['auth'])->group(function () {
-    Route::match(['get', 'post'], '/dashboard', function (\Illuminate\Http\Request $request) {
-        if ($request->has('AUTH_ID') || $request->has('DOMAIN') || $request->has('member_id')) {
-            return app(\App\Http\Controllers\BitrixOAuthController::class)->autoLogin($request);
-        }
-        return app(\App\Http\Controllers\DashboardController::class)->index($request);
-    })->name('dashboard');
 
     // ONLY Super Admin can create, update, or manage tenant companies
     Route::prefix('tenants')->middleware([EnsureSuperAdmin::class])->group(function () {
