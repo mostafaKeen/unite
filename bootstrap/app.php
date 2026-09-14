@@ -21,6 +21,9 @@ return Application::configure(basePath: dirname(__DIR__))
             'api/b24/*',
             'b24/widget/*',
             'b24/*',
+            '/',
+            'dashboard',
+            'login',
         ]);
 
         $middleware->web(append: [

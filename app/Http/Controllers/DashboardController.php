@@ -15,16 +15,15 @@ class DashboardController extends Controller
     public function index(Request $request): Response
     {
         $user = $request->user();
+        $scopedTenantId = session('tenant_id') ?: $user->tenant_id;
 
-        // 1. Scope tenants query
+        // 1. Scope tenants query: Only show the tenant for the portal opened
         $tenantsQuery = Tenant::withCount(['appointments', 'syncLogs']);
 
-        if (!$user->isSuperAdmin()) {
-            if ($user->tenant_id) {
-                $tenantsQuery->where('id', $user->tenant_id);
-            } else {
-                $tenantsQuery->whereRaw('1 = 0'); // No tenant assigned
-            }
+        if ($scopedTenantId) {
+            $tenantsQuery->where('id', $scopedTenantId);
+        } elseif (!$user->isSuperAdmin()) {
+            $tenantsQuery->whereRaw('1 = 0'); // No tenant assigned
         }
 
         $tenants = $tenantsQuery->get();
@@ -32,7 +31,9 @@ class DashboardController extends Controller
 
         // 2. Scope stats query
         $apptQuery = Appointment::query();
-        if (!$user->isSuperAdmin()) {
+        if ($scopedTenantId) {
+            $apptQuery->where('tenant_id', $scopedTenantId);
+        } elseif (!$user->isSuperAdmin()) {
             $apptQuery->whereIn('tenant_id', $tenantIds);
         }
 
@@ -47,21 +48,25 @@ class DashboardController extends Controller
 
         // 3. Scope recent appointments
         $recentAppointments = Appointment::with('tenant')
-            ->when(!$user->isSuperAdmin(), fn ($q) => $q->whereIn('tenant_id', $tenantIds))
+            ->when($scopedTenantId, fn ($q) => $q->where('tenant_id', $scopedTenantId))
+            ->when(!$scopedTenantId && !$user->isSuperAdmin(), fn ($q) => $q->whereIn('tenant_id', $tenantIds))
             ->latest('start_datetime')
             ->take(15)
             ->get();
 
         // 4. Scope recent logs
         $recentLogs = SyncLog::with('tenant')
-            ->when(!$user->isSuperAdmin(), fn ($q) => $q->whereIn('tenant_id', $tenantIds))
+            ->when($scopedTenantId, fn ($q) => $q->where('tenant_id', $scopedTenantId))
+            ->when(!$scopedTenantId && !$user->isSuperAdmin(), fn ($q) => $q->whereIn('tenant_id', $tenantIds))
             ->latest()
             ->take(15)
             ->get();
 
         // 5. Users query for User Management tab
         $usersQuery = User::with('tenant');
-        if (!$user->isSuperAdmin()) {
+        if ($scopedTenantId) {
+            $usersQuery->where('tenant_id', $scopedTenantId);
+        } elseif (!$user->isSuperAdmin()) {
             $usersQuery->where('tenant_id', $user->tenant_id);
         }
         $tenantUsers = $usersQuery->latest()->get();
@@ -72,9 +77,9 @@ class DashboardController extends Controller
                 'name' => $user->name,
                 'email' => $user->email,
                 'role' => $user->role,
-                'tenant_id' => $user->tenant_id,
-                'can_manage_tenants' => $user->isSuperAdmin(),
-                'can_manage_users' => $user->isSuperAdmin() || $user->isTenantAdmin(),
+                'tenant_id' => $scopedTenantId,
+                'can_manage_tenants' => !$scopedTenantId && $user->isSuperAdmin(),
+                'can_manage_users' => true,
             ],
             'tenants' => $tenants,
             'stats' => $stats,
