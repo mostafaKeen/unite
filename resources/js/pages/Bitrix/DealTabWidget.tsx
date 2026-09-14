@@ -131,6 +131,37 @@ export default function DealTabWidget({
         !selectedClinicId || (d.clinics && d.clinics.includes(selectedClinicId))
     );
 
+    // Initialize Bitrix24 JS SDK iframe resize
+    useEffect(() => {
+        const scriptId = 'bitrix-js-sdk';
+        if (!document.getElementById(scriptId)) {
+            const script = document.createElement('script');
+            script.id = scriptId;
+            script.src = '//api.bitrix24.com/api/v1/';
+            script.async = true;
+            script.onload = () => {
+                if (window.BX24) {
+                    window.BX24.init(() => {
+                        try {
+                            window.BX24?.fitWindow();
+                        } catch (e) {
+                            console.log('BX24 fitWindow call inside widget:', e);
+                        }
+                    });
+                }
+            };
+            document.head.appendChild(script);
+        } else if (window.BX24) {
+            window.BX24.init(() => {
+                try {
+                    window.BX24?.fitWindow();
+                } catch (e) {
+                    console.log('BX24 fitWindow call inside widget:', e);
+                }
+            });
+        }
+    }, []);
+
     // Default doctor if current doctor not available for selected clinic
     useEffect(() => {
         if (availableDoctors.length > 0 && (!selectedDoctorId || !availableDoctors.some(d => d.doctor_id === selectedDoctorId))) {

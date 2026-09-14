@@ -36,16 +36,17 @@ Route::middleware(['auth'])->group(function () {
     });
 });
 
-// 2. Bitrix24 OAuth Flows (Public / Webhook endpoints authorized by Bitrix24)
+// 2. Bitrix24 Local App & OAuth Flows (Public / Webhook endpoints authorized by Bitrix24)
+Route::match(['get', 'post'], '/b24/app/{tenant?}', [BitrixOAuthController::class, 'handleAppLaunch'])->name('b24.app.launch');
 Route::get('/b24/oauth/redirect/{tenant}', [BitrixOAuthController::class, 'redirect'])->name('b24.oauth.redirect');
 Route::get('/b24/oauth/callback', [BitrixOAuthController::class, 'callback'])->name('b24.oauth.callback');
 Route::post('/api/b24/webhook/{tenant}', [BitrixOAuthController::class, 'handleWebhook'])
     ->middleware(['throttle:60,1'])
     ->name('b24.webhook');
 
-// 3. Bitrix24 Embedded CRM Deal Tab Widget (Authorized via Bitrix24 context / iframe with rate limiting)
+// 3. Bitrix24 Embedded CRM Detail Tab Widget (Authorized via Bitrix24 context / iframe with rate limiting)
 Route::prefix('b24/widget/deal-tab/{tenant}')->middleware(['throttle:60,1'])->group(function () {
-    Route::get('/', [BitrixWidgetController::class, 'show'])->name('b24.widget.show');
+    Route::match(['get', 'post'], '/', [BitrixWidgetController::class, 'show'])->name('b24.widget.show');
     Route::get('/slots', [BitrixWidgetController::class, 'getAvailableSlots'])->name('b24.widget.slots');
     Route::post('/book', [BitrixWidgetController::class, 'bookAppointment'])->name('b24.widget.book');
     Route::post('/status/{appointment}', [BitrixWidgetController::class, 'updateStatus'])->name('b24.widget.status');

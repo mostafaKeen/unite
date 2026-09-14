@@ -20,6 +20,7 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->validateCsrfTokens(except: [
             'api/b24/*',
             'b24/widget/*',
+            'b24/*',
         ]);
 
         $middleware->web(append: [

@@ -168,35 +168,52 @@ class BitrixService
     }
 
     /**
-     * Register Event Handlers and CRM Deal Detail Tab Placement
+     * Register Event Handlers and CRM Lead, Deal & Contact Tab Placements
      */
     public function registerIntegrationPlacements(Tenant $tenant, string $appBaseUrl): array
     {
         $widgetUrl = rtrim($appBaseUrl, '/') . "/b24/widget/deal-tab/{$tenant->id}";
         $webhookUrl = rtrim($appBaseUrl, '/') . "/api/b24/webhook/{$tenant->id}";
 
-        // Bind CRM_DEAL_DETAIL_TAB
-        $placementRes = $this->call($tenant, 'placement.bind', [
-            'PLACEMENT' => 'CRM_DEAL_DETAIL_TAB',
-            'HANDLER' => $widgetUrl,
-            'TITLE' => 'Unite EMR Booking',
-            'LANG_ALL' => [
-                'en' => ['TITLE' => 'Unite EMR Booking'],
-                'ar' => ['TITLE' => 'حجز المواعيد Unite EMR']
-            ]
-        ]);
+        Log::info("Starting Bitrix24 Placement & Event binding for Tenant: {$tenant->name} ({$tenant->id})");
 
-        // Bind ONCRMDEALUPDATE event
-        $dealUpdateRes = $this->call($tenant, 'event.bind', [
-            'event' => 'ONCRMDEALUPDATE',
-            'handler' => $webhookUrl,
-        ]);
+        $results = [];
 
-        return [
-            'placement' => $placementRes,
-            'event' => $dealUpdateRes,
-            'widget_url' => $widgetUrl,
-            'webhook_url' => $webhookUrl,
+        // Bind CRM Placements: Lead, Deal, Contact
+        $placementsToBind = [
+            'CRM_LEAD_DETAIL_TAB' => 'Unite EMR Booking (Lead)',
+            'CRM_DEAL_DETAIL_TAB' => 'Unite EMR Booking (Deal)',
+            'CRM_CONTACT_DETAIL_TAB' => 'Unite EMR Booking (Contact)',
         ];
+
+        foreach ($placementsToBind as $placement => $title) {
+            $bindRes = $this->call($tenant, 'placement.bind', [
+                'PLACEMENT' => $placement,
+                'HANDLER' => $widgetUrl,
+                'TITLE' => $title,
+                'LANG_ALL' => [
+                    'en' => ['TITLE' => $title],
+                    'ar' => ['TITLE' => "حجز المواعيد Unite EMR - {$placement}"]
+                ]
+            ]);
+            $results["placement_{$placement}"] = $bindRes;
+            Log::info("Bound placement {$placement} for tenant {$tenant->name}:", ['response' => $bindRes]);
+        }
+
+        // Bind CRM Events: ONCRMDEALUPDATE & ONCRMLEADUPDATE
+        $eventsToBind = ['ONCRMDEALUPDATE', 'ONCRMLEADUPDATE'];
+        foreach ($eventsToBind as $event) {
+            $eventRes = $this->call($tenant, 'event.bind', [
+                'event' => $event,
+                'handler' => $webhookUrl,
+            ]);
+            $results["event_{$event}"] = $eventRes;
+            Log::info("Bound event {$event} for tenant {$tenant->name}:", ['response' => $eventRes]);
+        }
+
+        $results['widget_url'] = $widgetUrl;
+        $results['webhook_url'] = $webhookUrl;
+
+        return $results;
     }
 }

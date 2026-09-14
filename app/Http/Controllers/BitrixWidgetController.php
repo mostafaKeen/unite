@@ -21,15 +21,24 @@ class BitrixWidgetController extends Controller
     ) {}
 
     /**
-     * Render the Embedded CRM Deal Tab Widget (CRM_DEAL_DETAIL_TAB)
+     * Render the Embedded CRM Tab Widget (CRM_LEAD_DETAIL_TAB / CRM_DEAL_DETAIL_TAB / CRM_CONTACT_DETAIL_TAB)
      */
     public function show(Request $request, Tenant $tenant): Response
     {
-        // Check for Bitrix24 deal ID from PLACEMENT_OPTIONS or query param
-        $dealId = $request->query('deal_id');
+        Log::info("Bitrix24 Widget view requested for Tenant {$tenant->name}", [
+            'method' => $request->method(),
+            'placement' => $request->input('PLACEMENT'),
+            'placement_options' => $request->input('PLACEMENT_OPTIONS'),
+            'query' => $request->query(),
+        ]);
+
+        $dealId = $request->input('deal_id') ?: $request->query('deal_id');
+        $placement = $request->input('PLACEMENT', 'CRM_DEAL_DETAIL_TAB');
+
         if (!$dealId && $request->filled('PLACEMENT_OPTIONS')) {
-            $placementOptions = json_decode($request->input('PLACEMENT_OPTIONS'), true);
-            $dealId = $placementOptions['ID'] ?? null;
+            $rawOptions = $request->input('PLACEMENT_OPTIONS');
+            $placementOptions = is_array($rawOptions) ? $rawOptions : json_decode($rawOptions, true);
+            $dealId = $placementOptions['ID'] ?? $placementOptions['id'] ?? null;
         }
 
         // Fetch directories from cache or Unite API
@@ -37,7 +46,7 @@ class BitrixWidgetController extends Controller
         $doctors = $this->uniteClient->getDoctors($tenant);
         $items = $this->uniteClient->getItemDetails($tenant);
 
-        // Fetch existing appointment if already linked to this deal
+        // Fetch existing appointment if already linked to this entity
         $existingAppointment = null;
         if ($dealId) {
             $existingAppointment = Appointment::where('tenant_id', $tenant->id)
@@ -46,7 +55,7 @@ class BitrixWidgetController extends Controller
                 ->first();
         }
 
-        // Deal info simulation or fetch from Bitrix
+        // Deal / Lead info simulation or fetch from Bitrix
         $dealContext = null;
         if ($dealId && $tenant->isBitrixAuthenticated()) {
             try {
@@ -54,7 +63,7 @@ class BitrixWidgetController extends Controller
                 if (!empty($dealData)) {
                     $dealContext = [
                         'id' => $dealId,
-                        'title' => $dealData['TITLE'] ?? "Deal #{$dealId}",
+                        'title' => $dealData['TITLE'] ?? "CRM Entity #{$dealId}",
                         'contact_id' => $dealData['CONTACT_ID'] ?? null,
                     ];
                 }
@@ -72,6 +81,7 @@ class BitrixWidgetController extends Controller
             'items' => $items,
             'existingAppointment' => $existingAppointment,
             'statusMap' => BitrixService::STATUS_MAP,
+            'placement' => $placement,
         ]);
     }
 

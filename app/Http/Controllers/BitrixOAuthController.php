@@ -11,6 +11,8 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use Inertia\Inertia;
+use Inertia\Response;
 
 class BitrixOAuthController extends Controller
 {
@@ -18,6 +20,68 @@ class BitrixOAuthController extends Controller
         protected BitrixService $bitrixService,
         protected AppointmentSyncService $syncService
     ) {}
+
+    /**
+     * Handle local application iframe launch / installation view inside Bitrix24 portal
+     */
+    public function handleAppLaunch(Request $request, ?Tenant $tenant = null): Response
+    {
+        $input = $request->all();
+        $domain = $request->input('DOMAIN') ?: $request->input('domain');
+        $memberId = $request->input('member_id');
+        $authToken = $request->input('AUTH_ID') ?: $request->input('access_token');
+        $refreshToken = $request->input('REFRESH_ID') ?: $request->input('refresh_token');
+
+        Log::info("Bitrix24 App Launch/Handler invoked", [
+            'method' => $request->method(),
+            'tenant_param' => $tenant?->id,
+            'domain' => $domain,
+            'member_id' => $memberId,
+            'placement' => $request->input('PLACEMENT'),
+            'placement_options' => $request->input('PLACEMENT_OPTIONS'),
+            'params' => $input,
+        ]);
+
+        if (!$tenant && $domain) {
+            $tenant = Tenant::where('b24_domain', 'like', "%{$domain}%")->first();
+        }
+
+        if (!$tenant && $memberId) {
+            $tenant = Tenant::where('b24_member_id', $memberId)->first();
+        }
+
+        if (!$tenant) {
+            $tenant = Tenant::first();
+        }
+
+        if ($tenant && !empty($authToken)) {
+            $tenant->update([
+                'b24_access_token' => $authToken,
+                'b24_refresh_token' => $refreshToken ?: $tenant->b24_refresh_token,
+                'b24_domain' => $domain ?: $tenant->b24_domain,
+                'b24_member_id' => $memberId ?: $tenant->b24_member_id,
+                'b24_token_expires_at' => now()->addSeconds((int)($request->input('AUTH_EXPIRES') ?: 3600)),
+            ]);
+
+            try {
+                $this->bitrixService->registerIntegrationPlacements($tenant, $request->getSchemeAndHttpHost());
+            } catch (\Exception $e) {
+                Log::warning("Automatic placement registration on app launch warning: " . $e->getMessage());
+            }
+        }
+
+        return Inertia::render('Bitrix/LocalApp', [
+            'tenant' => $tenant,
+            'b24Context' => [
+                'domain' => $domain ?: $tenant?->b24_domain,
+                'member_id' => $memberId ?: $tenant?->b24_member_id,
+                'placement' => $request->input('PLACEMENT', 'DEFAULT'),
+                'placement_options' => $request->input('PLACEMENT_OPTIONS'),
+                'app_sid' => $request->input('APP_SID'),
+            ],
+            'isConfigured' => $tenant ? $tenant->isBitrixAuthenticated() : false,
+        ]);
+    }
 
     /**
      * Start OAuth flow with Bitrix24
