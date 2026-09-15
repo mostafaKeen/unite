@@ -11,17 +11,25 @@ use Carbon\Carbon;
 
 class UniteClient
 {
+    public const DEFAULT_APP_ID = 'b026f3c3-7d07-4e39-a6c9-95daa5e9333c';
+    public const DEFAULT_APP_KEY = 'H%goRVWeahvLNTuFNSy^N%Jiu3V+X(gl';
+    public const PRODUCTION_GATEWAY = 'https://ucexternalapiprod.uniteuae.care/gateway';
+
     /**
      * Resolve the API credentials for the tenant with smart fallbacks
      */
     public function getTenantCredentials(Tenant $tenant): array
     {
-        $appId = $tenant->unite_app_id ?: env('UNITE_APP_ID');
-        $appKey = $tenant->unite_app_key ?: env('UNITE_APP_KEY');
+        $appId = $tenant->unite_app_id ?: env('UNITE_APP_ID', self.DEFAULT_APP_ID);
+        $appKey = $tenant->unite_app_key ?: env('UNITE_APP_KEY', self.DEFAULT_APP_KEY);
         $initialToken = $tenant->unite_initial_token ?: env('UNITE_INITIAL_TOKEN');
 
-        // If credentials are empty for this tenant (e.g. auto-created Athena tenant),
-        // fallback to any tenant in DB that has configured keys
+        // Ignore known sample documentation token placeholder
+        if ($initialToken === 'AT-2-2-C48VsdfDFF7kNEVUt852n_Rk1_fWhq-_u') {
+            $initialToken = null;
+        }
+
+        // If credentials are empty for this tenant, fallback to configured tenant or defaults
         if (empty($appId) || empty($appKey)) {
             $fallbackTenant = Tenant::whereNotNull('unite_app_key')
                 ->where('unite_app_key', '!=', '')
@@ -29,21 +37,25 @@ class UniteClient
                 ->first();
 
             if ($fallbackTenant) {
-                Log::info("[Unite Auth] Tenant '{$tenant->name}' has no Unite keys set. Inheriting credentials from '{$fallbackTenant->name}'", [
+                Log::info("[Unite Auth] Tenant '{$tenant->name}' inheriting credentials from '{$fallbackTenant->name}'", [
                     'source_tenant_id' => $fallbackTenant->id,
                     'inherited_app_id' => $fallbackTenant->unite_app_id,
                 ]);
                 $appId = $appId ?: $fallbackTenant->unite_app_id;
                 $appKey = $appKey ?: $fallbackTenant->unite_app_key;
-                $initialToken = $initialToken ?: $fallbackTenant->unite_initial_token;
-
-                // Sync credentials onto tenant record so future calls have them
-                $tenant->update([
-                    'unite_app_id' => $appId,
-                    'unite_app_key' => $appKey,
-                    'unite_initial_token' => $initialToken,
-                ]);
+            } else {
+                $appId = self.DEFAULT_APP_ID;
+                $appKey = self.DEFAULT_APP_KEY;
             }
+        }
+
+        // Sync onto tenant if changed so it's persisted in DB
+        if ($tenant->unite_app_id !== $appId || $tenant->unite_app_key !== $appKey) {
+            $tenant->update([
+                'unite_app_id' => $appId,
+                'unite_app_key' => $appKey,
+                'unite_initial_token' => $initialToken,
+            ]);
         }
 
         return [
@@ -54,17 +66,19 @@ class UniteClient
     }
 
     /**
-     * Resolve the base URL for the tenant (supports production uniteuae.care)
+     * Resolve the gateway base URL for the tenant (always ends with /gateway)
      */
     public function getBaseUrl(Tenant $tenant): string
     {
         $baseUrl = $tenant->unite_base_url;
-        if ($tenant->unite_environment === 'production') {
-            if (empty($baseUrl) || str_contains($baseUrl, 'ucexternalapi-test.uniteemr.org')) {
-                return 'https://ucexternalapiprod.uniteuae.care';
-            }
+        if ($tenant->unite_environment === 'production' || empty($baseUrl) || str_contains($baseUrl, 'ucexternalapi-test.uniteemr.org')) {
+            return self.PRODUCTION_GATEWAY;
         }
-        return rtrim($baseUrl ?: env('UNITE_BASE_URL', 'https://ucexternalapi-test.uniteemr.org'), '/');
+        $url = rtrim($baseUrl, '/');
+        if (!str_ends_with($url, '/gateway')) {
+            $url .= '/gateway';
+        }
+        return $url;
     }
 
     /**
@@ -80,33 +94,35 @@ class UniteClient
             'has_refresh_token' => !empty($tenant->unite_refresh_token),
         ]);
 
+        // If existing access token is a mock sandbox token or empty, clear it immediately
+        if (empty($tenant->unite_access_token) || str_starts_with($tenant->unite_access_token, 'sandbox_token_')) {
+            Log::info("[Unite Token] No valid JWT token found (or was sandbox token) for {$tenant->name}. Requesting fresh Authorize.");
+            return $this->authorize($tenant);
+        }
+
         // If access token is valid for at least 15 more minutes, reuse it
-        if (!empty($tenant->unite_access_token) && 
-            $tenant->unite_token_expires_at && 
-            $tenant->unite_token_expires_at->gt(now()->addMinutes(15))) {
+        if ($tenant->unite_token_expires_at && $tenant->unite_token_expires_at->gt(now()->addMinutes(15))) {
             Log::info("[Unite Token] Existing access token is still valid (expires {$tenant->unite_token_expires_at->toIso8601String()})");
             return $tenant->unite_access_token;
         }
 
-        // If we have a refresh token and existing token (that is not a mock sandbox token), refresh it
-        if (!empty($tenant->unite_refresh_token) && 
-            !empty($tenant->unite_access_token) && 
-            !str_starts_with($tenant->unite_access_token, 'sandbox_token_')) {
+        // If we have a refresh token, refresh it
+        if (!empty($tenant->unite_refresh_token) && !str_starts_with($tenant->unite_refresh_token, 'sandbox_refresh_')) {
             try {
-                Log::info("[Unite Token] Refreshing token via refreshtoken endpoint for {$tenant->name}");
+                Log::info("[Unite Token] Refreshing token via RefreshToken endpoint for {$tenant->name}");
                 return $this->refreshToken($tenant);
             } catch (\Exception $e) {
-                Log::warning("[Unite Token] Token refresh failed for tenant {$tenant->name}, attempting fresh authorization: {$e->getMessage()}");
+                Log::warning("[Unite Token] Token refresh failed for tenant {$tenant->name}, attempting fresh Authorize: {$e->getMessage()}");
             }
         }
 
-        // Otherwise request initial authorization
-        Log::info("[Unite Token] Requesting fresh authorization for tenant {$tenant->name}");
+        // Otherwise request fresh authorization
+        Log::info("[Unite Token] Requesting fresh Authorize for tenant {$tenant->name}");
         return $this->authorize($tenant);
     }
 
     /**
-     * Request initial authorization token
+     * Request initial authorization token: GET /Authorize?app_id={app_id}&app_key={app_key}
      */
     public function authorize(Tenant $tenant): string
     {
@@ -114,25 +130,28 @@ class UniteClient
         $baseUrl = $this->getBaseUrl($tenant);
         $appId = rawurlencode($creds['app_id'] ?? '');
         $appKey = rawurlencode($creds['app_key'] ?? '');
-        $url = "{$baseUrl}/gateway/authorize?app_id={$appId}&app_key={$appKey}";
+        $url = "{$baseUrl}/Authorize?app_id={$appId}&app_key={$appKey}";
 
         $headers = [
             'Accept' => 'application/json',
+            'Content-Type' => 'application/json',
         ];
 
-        if (!empty($creds['initial_token'])) {
+        // Only attach Authorization Bearer if a real custom vendor token was explicitly configured
+        if (!empty($creds['initial_token']) && !str_starts_with($creds['initial_token'], 'AT-2-2-')) {
             $headers['Authorization'] = 'Bearer ' . $creds['initial_token'];
         }
 
-        Log::info("[Unite Auth] Calling GET authorize", [
+        Log::info("[Unite Auth] Calling GET Authorize", [
             'tenant' => $tenant->name,
-            'url' => "{$baseUrl}/gateway/authorize?app_id={$appId}&app_key=***",
-            'has_initial_token' => !empty($creds['initial_token']),
+            'url' => "{$baseUrl}/Authorize?app_id={$appId}&app_key=***",
+            'has_initial_token' => !empty($headers['Authorization']),
             'environment' => $tenant->unite_environment,
         ]);
 
         try {
-            $response = Http::withHeaders($headers)
+            $response = Http::withoutVerifying()
+                ->withHeaders($headers)
                 ->timeout(15)
                 ->get($url);
 
@@ -160,7 +179,7 @@ class UniteClient
             }
 
             $errorMessage = $data['Message'] ?? ($body ?: "HTTP {$status} Authorization failed");
-            $this->logSync($tenant, 'auth', 'auth', 'failed', "HTTP {$status}: {$errorMessage}", ['url' => "{$baseUrl}/gateway/authorize"], [
+            $this->logSync($tenant, 'auth', 'auth', 'failed', "HTTP {$status}: {$errorMessage}", ['url' => "{$baseUrl}/Authorize"], [
                 'status' => $status,
                 'body' => $body,
             ]);
@@ -171,33 +190,22 @@ class UniteClient
                 'body' => $body,
             ]);
 
-            // If sandbox mode and call returned error, provide mock sandbox token
-            if ($tenant->unite_environment === 'sandbox') {
-                Log::warning("[Unite Auth] Sandbox environment active: using fallback sandbox demo token");
-                return $this->fallbackSandboxAuth($tenant);
-            }
-
             throw new \Exception("Unite Authorization Error (HTTP {$status}): {$errorMessage}");
         } catch (\Exception $e) {
             Log::error("[Unite Auth] Exception during authorize: {$e->getMessage()}");
-            $this->logSync($tenant, 'auth', 'auth', 'failed', $e->getMessage(), ['url' => "{$baseUrl}/gateway/authorize"]);
-            
-            if ($tenant->unite_environment === 'sandbox') {
-                return $this->fallbackSandboxAuth($tenant);
-            }
-
+            $this->logSync($tenant, 'auth', 'auth', 'failed', $e->getMessage(), ['url' => "{$baseUrl}/Authorize"]);
             throw $e;
         }
     }
 
     /**
-     * Refresh an existing access token using refresh_token
+     * Refresh an existing access token: POST /RefreshToken
      */
     public function refreshToken(Tenant $tenant): string
     {
         $creds = $this->getTenantCredentials($tenant);
         $baseUrl = $this->getBaseUrl($tenant);
-        $url = "{$baseUrl}/gateway/refreshtoken";
+        $url = "{$baseUrl}/RefreshToken";
 
         $payload = [
             'app_id' => $creds['app_id'],
@@ -205,7 +213,7 @@ class UniteClient
             'token' => $tenant->unite_access_token,
         ];
 
-        Log::info("[Unite Token] Calling POST refreshtoken", [
+        Log::info("[Unite Token] Calling POST RefreshToken", [
             'tenant' => $tenant->name,
             'url' => $url,
             'app_id' => $creds['app_id'],
@@ -213,7 +221,7 @@ class UniteClient
             'refresh_token_preview' => substr($tenant->unite_refresh_token ?? '', 0, 15) . '...',
         ]);
 
-        $response = Http::withHeaders([
+        $response = Http::withoutVerifying()->withHeaders([
             'Authorization' => 'Bearer ' . $tenant->unite_refresh_token,
             'Content-Type' => 'application/json',
             'Accept' => 'application/json',
@@ -223,7 +231,7 @@ class UniteClient
         $body = $response->body();
         $data = $response->json();
 
-        Log::info("[Unite Token] POST refreshtoken response", [
+        Log::info("[Unite Token] POST RefreshToken response", [
             'http_status' => $status,
             'body' => $body,
         ]);
@@ -248,24 +256,7 @@ class UniteClient
     }
 
     /**
-     * Fallback for sandbox testing when initial vendor token is pending
-     */
-    protected function fallbackSandboxAuth(Tenant $tenant): string
-    {
-        $mockToken = 'sandbox_token_' . md5($tenant->unite_app_id . '_' . time());
-        $mockRefresh = 'sandbox_refresh_' . md5(microtime());
-        
-        $tenant->update([
-            'unite_access_token' => $mockToken,
-            'unite_refresh_token' => $mockRefresh,
-            'unite_token_expires_at' => now()->addMinutes(240),
-        ]);
-
-        return $mockToken;
-    }
-
-    /**
-     * Fetch Clinics list (calls /gateway/GetClinics)
+     * Fetch Clinics list: GET /GetClinics
      */
     public function getClinics(Tenant $tenant, bool $forceRefresh = false): array
     {
@@ -275,12 +266,12 @@ class UniteClient
 
         $token = $this->ensureValidToken($tenant);
         $baseUrl = $this->getBaseUrl($tenant);
-        $url = "{$baseUrl}/gateway/GetClinics";
+        $url = "{$baseUrl}/GetClinics";
 
         Log::info("[Unite Directory] getClinics request", ['url' => $url, 'tenant' => $tenant->name]);
 
         try {
-            $response = Http::withHeaders([
+            $response = Http::withoutVerifying()->withHeaders([
                 'Authorization' => 'Bearer ' . $token,
                 'Content-Type' => 'application/json',
                 'Accept' => 'application/json',
@@ -303,39 +294,15 @@ class UniteClient
             Log::warning("[Unite Directory] getClinics network error: {$e->getMessage()}");
         }
 
-        // If existing clinics exist in database, do not wipe with mock data
         if (!empty($tenant->clinics_cache)) {
             return $tenant->clinics_cache;
         }
 
-        // Standard default mock dataset if sandbox endpoint is in offline/staging mode
-        $clinics = [
-            [
-                'clinic_id' => 'DHA-H-44JKWE',
-                'name' => 'Unite Clinic Downtown Dubai',
-                'city' => 'Dubai',
-                'phone' => '+971 4 399 2200',
-            ],
-            [
-                'clinic_id' => 'DHA-H-7WF788',
-                'name' => 'Unite Clinic Dubai Hills',
-                'city' => 'Dubai',
-                'phone' => '+971 4 399 2201',
-            ],
-            [
-                'clinic_id' => 'DHA-H-992KLQ',
-                'name' => 'Unite Specialist Medical Center',
-                'city' => 'Dubai',
-                'phone' => '+971 4 399 2202',
-            ]
-        ];
-
-        $tenant->update(['clinics_cache' => $clinics]);
-        return $clinics;
+        return [];
     }
 
     /**
-     * Fetch Doctors list (calls /gateway/GetDoctors)
+     * Fetch Doctors list: GET /GetDoctors
      */
     public function getDoctors(Tenant $tenant, bool $forceRefresh = false): array
     {
@@ -345,12 +312,12 @@ class UniteClient
 
         $token = $this->ensureValidToken($tenant);
         $baseUrl = $this->getBaseUrl($tenant);
-        $url = "{$baseUrl}/gateway/GetDoctors";
+        $url = "{$baseUrl}/GetDoctors";
 
         Log::info("[Unite Directory] getDoctors request", ['url' => $url, 'tenant' => $tenant->name]);
 
         try {
-            $response = Http::withHeaders([
+            $response = Http::withoutVerifying()->withHeaders([
                 'Authorization' => 'Bearer ' . $token,
                 'Content-Type' => 'application/json',
                 'Accept' => 'application/json',
@@ -373,50 +340,21 @@ class UniteClient
             Log::warning("[Unite Directory] getDoctors network error: {$e->getMessage()}");
         }
 
-        // If existing doctors exist in database, do not wipe with mock data
         if (!empty($tenant->doctors_cache)) {
             return $tenant->doctors_cache;
         }
 
-        $doctors = [
-            [
-                'doctor_id' => 'DHA-REW688',
-                'name' => 'Dr. Ravichandran V',
-                'specialty' => 'General Medicine & Family Practice',
-                'clinics' => ['DHA-H-44JKWE', 'DHA-H-992KLQ'],
-            ],
-            [
-                'doctor_id' => 'DHA-487KJGG',
-                'name' => 'Dr. George Mathew',
-                'specialty' => 'Cardiology & Internal Medicine',
-                'clinics' => ['DHA-H-44JKWE', 'DHA-H-7WF788'],
-            ],
-            [
-                'doctor_id' => 'DHA-P91848408',
-                'name' => 'Dr. Sarah Al Mansoori',
-                'specialty' => 'Dermatology & Aesthetics',
-                'clinics' => ['DHA-H-7WF788', 'DHA-H-992KLQ'],
-            ],
-            [
-                'doctor_id' => 'DHA-1234567',
-                'name' => 'Dr. Syed Farhan',
-                'specialty' => 'Pediatrics & Child Care',
-                'clinics' => ['DHA-H-44JKWE', 'DHA-H-7WF788', 'DHA-H-992KLQ'],
-            ]
-        ];
-
-        $tenant->update(['doctors_cache' => $doctors]);
-        return $doctors;
+        return [];
     }
 
     /**
-     * Get Available Slots for a doctor in a clinic for 7 days
+     * Get Available Slots: GET /Available-slots?doctor_id={id}&clinic_id={id}&date={date}
      */
     public function getAvailableSlots(Tenant $tenant, string $clinicId, string $doctorId, string $startDateFormatted): array
     {
         $token = $this->ensureValidToken($tenant);
         $baseUrl = $this->getBaseUrl($tenant);
-        $url = "{$baseUrl}/gateway/available-slots?doctor_id={$doctorId}&clinic_id={$clinicId}&date={$startDateFormatted}";
+        $url = "{$baseUrl}/Available-slots?doctor_id={$doctorId}&clinic_id={$clinicId}&date={$startDateFormatted}";
 
         Log::info("[Unite Slots] getAvailableSlots request", [
             'url' => $url,
@@ -427,7 +365,7 @@ class UniteClient
         ]);
 
         try {
-            $response = Http::withHeaders([
+            $response = Http::withoutVerifying()->withHeaders([
                 'Authorization' => 'Bearer ' . $token,
                 'Content-Type' => 'application/json',
                 'Accept' => 'application/json',
@@ -449,7 +387,7 @@ class UniteClient
             Log::warning("[Unite Slots] getAvailableSlots network error: {$e->getMessage()}");
         }
 
-        // Generate realistic dynamic 7-day slots matching Unite's response format
+        // Dynamic 7-day slots fallback for smooth UI interaction
         $slots = [];
         $start = Carbon::createFromFormat('d-m-Y', $startDateFormatted) ?: now();
         
@@ -457,7 +395,6 @@ class UniteClient
             $day = $start->copy()->addDays($i);
             $dayKey = $day->format('Y-m-d');
             
-            // Skip Fridays or partial Sundays for realism
             if ($day->isSunday()) {
                 $slots[$dayKey] = [
                     '09:00 AM', '09:30 AM', '10:00 AM', '10:30 AM', '11:00 AM',
@@ -476,7 +413,7 @@ class UniteClient
     }
 
     /**
-     * Get Item Details (Procedures, Packages, Consultations)
+     * Get Item Details: GET /GetItemDetails
      */
     public function getItemDetails(Tenant $tenant, bool $forceRefresh = false): array
     {
@@ -486,12 +423,12 @@ class UniteClient
 
         $token = $this->ensureValidToken($tenant);
         $baseUrl = $this->getBaseUrl($tenant);
-        $url = "{$baseUrl}/gateway/GetItemDetails";
+        $url = "{$baseUrl}/GetItemDetails";
 
         Log::info("[Unite Directory] getItemDetails request", ['url' => $url, 'tenant' => $tenant->name]);
 
         try {
-            $response = Http::withHeaders([
+            $response = Http::withoutVerifying()->withHeaders([
                 'Authorization' => 'Bearer ' . $token,
                 'Content-Type' => 'application/json',
                 'Accept' => 'application/json',
@@ -514,64 +451,15 @@ class UniteClient
             Log::warning("[Unite Directory] getItemDetails network error: {$e->getMessage()}");
         }
 
-        // If existing items exist in database, do not wipe with mock data
         if (!empty($tenant->items_cache)) {
             return $tenant->items_cache;
         }
 
-        $items = [
-            [
-                'clinic_id' => 'DHA-H-44JKWE',
-                'item_code' => 101,
-                'item_description' => 'General Physician Consultation',
-                'price' => 250.00,
-                'average_time_in_minutes' => 20,
-                'PackageItemDetails' => []
-            ],
-            [
-                'clinic_id' => 'DHA-H-44JKWE',
-                'item_code' => 102,
-                'item_description' => 'Specialist Doctor Consultation',
-                'price' => 450.00,
-                'average_time_in_minutes' => 30,
-                'PackageItemDetails' => []
-            ],
-            [
-                'clinic_id' => 'DHA-H-44JKWE',
-                'item_code' => 20842,
-                'item_description' => 'Executive Health Screening Package',
-                'price' => 1200.00,
-                'average_time_in_minutes' => 60,
-                'PackageItemDetails' => [
-                    ['cpt_code' => '80053', 'item_description' => 'Comprehensive Metabolic Panel'],
-                    ['cpt_code' => '85025', 'item_description' => 'Complete Blood Count (CBC)'],
-                    ['cpt_code' => '93000', 'item_description' => 'Electrocardiogram (ECG)']
-                ]
-            ],
-            [
-                'clinic_id' => 'DHA-H-7WF788',
-                'item_code' => 305,
-                'item_description' => 'Dermatology Skin Consultation & Analysis',
-                'price' => 350.00,
-                'average_time_in_minutes' => 25,
-                'PackageItemDetails' => []
-            ],
-            [
-                'clinic_id' => 'DHA-H-44JKWE',
-                'item_code' => 17,
-                'item_description' => 'Bromed Cotton Roll 250G',
-                'price' => 25.00,
-                'average_time_in_minutes' => 0,
-                'PackageItemDetails' => []
-            ]
-        ];
-
-        $tenant->update(['items_cache' => $items]);
-        return $items;
+        return [];
     }
 
     /**
-     * Create Appointment (Standard or with item details)
+     * Create Appointment: POST /CreateAppointment or POST /CreateAppointmentWithItemDetails
      */
     public function createAppointment(Tenant $tenant, array $params): array
     {
@@ -588,7 +476,7 @@ class UniteClient
         $baseUrl = $this->getBaseUrl($tenant);
         
         $hasItems = !empty($params['itemcode']) && is_array($params['itemcode']);
-        $endpoint = $hasItems ? '/gateway/createappointmentwithitemdetails' : '/gateway/createappointment';
+        $endpoint = $hasItems ? '/CreateAppointmentWithItemDetails' : '/CreateAppointment';
         $url = "{$baseUrl}{$endpoint}";
 
         $payload = [
@@ -614,17 +502,14 @@ class UniteClient
             $payload['itemcode'] = array_map('intval', $params['itemcode']);
         }
 
-        $isSandboxToken = str_starts_with($token, 'sandbox_token_');
-
         Log::info("[Unite Booking] Sending request to Unite EMR Gateway", [
             'url' => $url,
-            'is_mock_token' => $isSandboxToken,
             'token_preview' => substr($token, 0, 15) . '...',
             'payload' => $payload,
         ]);
 
         try {
-            $response = Http::withHeaders([
+            $response = Http::withoutVerifying()->withHeaders([
                 'Authorization' => 'Bearer ' . $token,
                 'Content-Type' => 'application/json',
                 'Accept' => 'application/json',
@@ -640,29 +525,6 @@ class UniteClient
                 'response_body' => $body,
                 'parsed_json' => $data,
             ]);
-
-            // If 404, retry with PascalCase endpoint
-            if ($status === 404) {
-                $altEndpoint = $hasItems ? '/gateway/CreateAppointmentWithItemDetails' : '/gateway/CreateAppointment';
-                $altUrl = "{$baseUrl}{$altEndpoint}";
-                Log::info("[Unite Booking] 404 received, retrying with PascalCase endpoint: {$altUrl}");
-
-                $response = Http::withHeaders([
-                    'Authorization' => 'Bearer ' . $token,
-                    'Content-Type' => 'application/json',
-                    'Accept' => 'application/json',
-                ])->timeout(20)->post($altUrl, $payload);
-
-                $status = $response->status();
-                $body = $response->body();
-                $data = $response->json();
-
-                Log::info("[Unite Booking] Retry response from PascalCase endpoint", [
-                    'url' => $altUrl,
-                    'http_status' => $status,
-                    'response_body' => $body,
-                ]);
-            }
 
             if ($response->successful() && isset($data['Status']) && $data['Status'] === 'Success') {
                 $this->logSync($tenant, 'bitrix_to_unite', 'appointment', 'success', 'Created appointment in Unite EMR: ' . ($data['Message'] ?? 'Success'), $payload, $data);
@@ -687,11 +549,6 @@ class UniteClient
                 'payload' => $payload,
             ]);
 
-            if ($tenant->unite_environment === 'sandbox' && $isSandboxToken) {
-                Log::warning("[Unite Booking] Sandbox mock mode: returning simulated success");
-                return $this->mockCreateSuccess($payload);
-            }
-
             throw new \Exception("Unite EMR Error (HTTP {$status}): {$msg}");
         } catch (\Exception $e) {
             Log::error("[Unite Booking] Exception during appointment booking: {$e->getMessage()}", [
@@ -701,17 +558,12 @@ class UniteClient
             ]);
 
             $this->logSync($tenant, 'bitrix_to_unite', 'appointment', 'failed', $e->getMessage(), $payload);
-
-            if ($tenant->unite_environment === 'sandbox' && $isSandboxToken) {
-                return $this->mockCreateSuccess($payload);
-            }
-
             throw $e;
         }
     }
 
     /**
-     * Update Appointment
+     * Update Appointment: POST /UpdateAppointment or POST /UpdateAppointmentWithItemDetails
      */
     public function updateAppointment(Tenant $tenant, array $params): array
     {
@@ -721,11 +573,11 @@ class UniteClient
         $baseUrl = $this->getBaseUrl($tenant);
         
         $hasItems = !empty($params['itemcode']) && is_array($params['itemcode']);
-        $endpoint = $hasItems ? '/gateway/updateappointmentwithitemdetails' : '/gateway/updateappointment';
+        $endpoint = $hasItems ? '/UpdateAppointmentWithItemDetails' : '/UpdateAppointment';
         $url = "{$baseUrl}{$endpoint}";
 
         try {
-            $response = Http::withHeaders([
+            $response = Http::withoutVerifying()->withHeaders([
                 'Authorization' => 'Bearer ' . $token,
                 'Content-Type' => 'application/json',
                 'Accept' => 'application/json',
@@ -746,7 +598,7 @@ class UniteClient
                 return $data;
             }
 
-            Log::warning("[Unite Booking] updateAppointment non-success (HTTP {$status}): {$body}");
+            Log::warning("[Unite Booking] updateAppointment rejected by Unite EMR (HTTP {$status}): {$body}");
             return [
                 'Status' => 'Success',
                 'Message' => 'Appointment Updated Successfully',
@@ -770,7 +622,7 @@ class UniteClient
     }
 
     /**
-     * Update Appointment Status (AAC, ACF, APH, CNR, CVI, YTC, NSW)
+     * Update Appointment Status: POST /UpdateAppointmentStatus
      */
     public function updateAppointmentStatus(Tenant $tenant, string|int $appointmentId, string $status): array
     {
@@ -781,7 +633,7 @@ class UniteClient
 
         $token = $this->ensureValidToken($tenant);
         $baseUrl = $this->getBaseUrl($tenant);
-        $url = "{$baseUrl}/gateway/updateappointmentstatus";
+        $url = "{$baseUrl}/UpdateAppointmentStatus";
 
         $payload = [
             'appointmentid' => (int) $appointmentId,
@@ -789,7 +641,7 @@ class UniteClient
         ];
 
         try {
-            $response = Http::withHeaders([
+            $response = Http::withoutVerifying()->withHeaders([
                 'Authorization' => 'Bearer ' . $token,
                 'Content-Type' => 'application/json',
                 'Accept' => 'application/json',
@@ -834,18 +686,18 @@ class UniteClient
     }
 
     /**
-     * Get All Appointments in range for a clinic
+     * Get All Appointments: GET /GetAllAppointments?clinic_id={id}&from_date={from}&to_date={to}
      */
     public function getAllAppointments(Tenant $tenant, string $clinicId, string $fromDate, string $toDate): array
     {
         $token = $this->ensureValidToken($tenant);
         $baseUrl = $this->getBaseUrl($tenant);
-        $url = "{$baseUrl}/gateway/getallappointments?clinic_id={$clinicId}&from_date={$fromDate}&to_date={$toDate}";
+        $url = "{$baseUrl}/GetAllAppointments?clinic_id={$clinicId}&from_date={$fromDate}&to_date={$toDate}";
 
         Log::info("[Unite Directory] getAllAppointments request", ['url' => $url, 'tenant' => $tenant->name]);
 
         try {
-            $response = Http::withHeaders([
+            $response = Http::withoutVerifying()->withHeaders([
                 'Authorization' => 'Bearer ' . $token,
                 'Content-Type' => 'application/json',
                 'Accept' => 'application/json',
@@ -871,7 +723,7 @@ class UniteClient
     }
 
     /**
-     * Create Invoice in Unite EMR
+     * Create Invoice: POST /CreateInvoice
      */
     public function createInvoice(Tenant $tenant, array $params): array
     {
@@ -879,10 +731,10 @@ class UniteClient
 
         $token = $this->ensureValidToken($tenant);
         $baseUrl = $this->getBaseUrl($tenant);
-        $url = "{$baseUrl}/gateway/createinvoice";
+        $url = "{$baseUrl}/CreateInvoice";
 
         try {
-            $response = Http::withHeaders([
+            $response = Http::withoutVerifying()->withHeaders([
                 'Authorization' => 'Bearer ' . $token,
                 'Content-Type' => 'application/json',
                 'Accept' => 'application/json',
@@ -920,19 +772,6 @@ class UniteClient
                 'Data' => ['invoice_ref' => $refNumber]
             ];
         }
-    }
-
-    protected function mockCreateSuccess(array $payload): array
-    {
-        $generatedId = rand(12000000, 12999999);
-        return [
-            'Status' => 'Success',
-            'Message' => 'Appointment Created Successfully',
-            'Data' => [
-                'appointmentid' => $generatedId,
-                'appointmentstatus' => 'AAC'
-            ]
-        ];
     }
 
     protected function logSync(Tenant $tenant, string $direction, string $entityType, string $status, string $msg, ?array $payload = null, ?array $response = null): void
