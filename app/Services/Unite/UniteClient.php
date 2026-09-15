@@ -537,7 +537,7 @@ class UniteClient
     /**
      * Create Appointment: POST /CreateAppointment or POST /CreateAppointmentWithItemDetails
      */
-    public function createAppointment(Tenant $tenant, array $params): array
+    public function createAppointment(Tenant $tenant, array $params, bool $isRetry = false): array
     {
         $startTime = microtime(true);
         Log::info("[Unite Booking] createAppointment initiated for Tenant: {$tenant->name} (ID: {$tenant->id})", [
@@ -624,6 +624,25 @@ class UniteClient
             }
 
             $msg = $data['Message'] ?? ($body ?: "HTTP {$status} Appointment creation rejected");
+
+            // Auto-recovery: If Unite Gateway returns ConnectionString or Token error, clear stored token and retry once with fresh Authorize
+            $isConnectionStringError = is_string($body) && str_contains($body, 'ConnectionString');
+            $isTokenMsg = isset($data['Message']) && (
+                str_contains(strtolower($data['Message']), 'token') ||
+                str_contains(strtolower($data['Message']), 'connectionstring')
+            );
+            $isTokenOrConnectionError = $status === 401 || ($status === 400 && ($isConnectionStringError || $isTokenMsg));
+
+            if ($isTokenOrConnectionError && !$isRetry) {
+                Log::warning("[Unite Booking] ConnectionString / Token invalid error received from Unite Gateway for '{$tenant->name}' (HTTP {$status}: {$msg}). Clearing stored token and attempting fresh Authorize retry...");
+                $tenant->update([
+                    'unite_access_token' => null,
+                    'unite_refresh_token' => null,
+                    'unite_token_expires_at' => null,
+                ]);
+                return $this->createAppointment($tenant, $params, true);
+            }
+
             $this->logSync($tenant, 'bitrix_to_unite', 'appointment', 'failed', "HTTP {$status}: {$msg}", $payload, [
                 'status_code' => $status,
                 'body' => $body,
