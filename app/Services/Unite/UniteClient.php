@@ -63,7 +63,7 @@ class UniteClient
     {
         $baseUrl = $tenant->unite_base_url;
         if ($tenant->unite_environment === 'production' || empty($baseUrl) || str_contains($baseUrl, 'ucexternalapi-test.uniteemr.org')) {
-            return self.PRODUCTION_GATEWAY;
+            return self::PRODUCTION_GATEWAY;
         }
         $url = rtrim($baseUrl, '/');
         if (!str_ends_with($url, '/gateway')) {
