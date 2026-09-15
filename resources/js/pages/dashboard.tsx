@@ -1423,7 +1423,7 @@ export default function Dashboard({
                                         </label>
                                         <input
                                             type="text"
-                                            placeholder="e.g. b026f3c3-7d07-4e39-a6c9-95daa5e9333c"
+                                            placeholder="e.g. 00000000-0000-0000-0000-000000000000"
                                             value={newTenant.unite_app_id}
                                             onChange={(e) => setNewTenant({ ...newTenant, unite_app_id: e.target.value })}
                                             className="w-full px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-mono"
@@ -1437,7 +1437,7 @@ export default function Dashboard({
                                         <div className="relative">
                                             <input
                                                 type={showNewUniteKey ? 'text' : 'password'}
-                                                placeholder="e.g. H%goRVWeahvLNTuFNSy^N%Jiu3V+X(gl"
+                                                placeholder="Enter clinic App Key"
                                                 value={newTenant.unite_app_key}
                                                 onChange={(e) => setNewTenant({ ...newTenant, unite_app_key: e.target.value })}
                                                 className="w-full px-3.5 py-2 pr-9 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-mono"
@@ -1617,7 +1617,7 @@ export default function Dashboard({
                                         </label>
                                         <input
                                             type="text"
-                                            placeholder="e.g. b026f3c3-7d07-4e39-a6c9-95daa5e9333c"
+                                            placeholder="e.g. 00000000-0000-0000-0000-000000000000"
                                             value={editTenantForm.unite_app_id}
                                             onChange={(e) => setEditTenantForm({ ...editTenantForm, unite_app_id: e.target.value })}
                                             className="w-full px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-mono"

@@ -27,15 +27,15 @@ class TenantSeeder extends Seeder
                 'b24_client_endpoint' => 'https://unite-health.bitrix24.com/rest/',
                 'b24_deal_category_id' => 1,
                 
-                // Unite EMR credentials from User Prompt
-                'unite_environment' => 'sandbox',
-                'unite_base_url' => 'https://ucexternalapi-test.uniteemr.org',
-                'unite_app_id' => 'b026f3c3-7d07-4e39-a6c9-95daa5e9333c',
-                'unite_app_key' => 'H%goRVWeahvLNTuFNSy^N%Jiu3V+X(gl',
-                'unite_initial_token' => 'AT-2-2-C48VsdfDFF7kNEVUt852n_Rk1_fWhq-_u',
-                'unite_access_token' => 'eyJhbGciOiJIUzI1NiIsInR5cCIkpXVCJ9.eyJqdGkiOiJmZDA3ZD...',
-                'unite_refresh_token' => 'IUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiIxYzFhNjg0Yi0yNWNk...',
-                'unite_token_expires_at' => now()->addMinutes(200),
+                // Unite EMR credentials (configured dynamically per tenant or via .env for local testing)
+                'unite_environment' => 'production',
+                'unite_base_url' => 'https://ucexternalapiprod.uniteuae.care/gateway',
+                'unite_app_id' => env('UNITE_APP_ID', null),
+                'unite_app_key' => env('UNITE_APP_KEY', null),
+                'unite_initial_token' => null,
+                'unite_access_token' => null,
+                'unite_refresh_token' => null,
+                'unite_token_expires_at' => null,
                 'default_clinic_id' => 'DHA-H-44JKWE',
                 
                 'clinics_cache' => [
@@ -296,8 +296,8 @@ class TenantSeeder extends Seeder
             'direction' => 'auth',
             'entity_type' => 'auth',
             'status' => 'success',
-            'message' => 'Successfully authenticated with Unite EMR Sandbox Gateway (App ID: b026f3c3-...)',
-            'payload' => ['app_id' => 'b026f3c3-7d07-4e39-a6c9-95daa5e9333c'],
+            'message' => 'Successfully authenticated with Unite EMR Gateway',
+            'payload' => ['app_id' => 'sample-app-id'],
             'response' => ['Status' => 'Success', 'expires_in' => 240],
         ]);
 

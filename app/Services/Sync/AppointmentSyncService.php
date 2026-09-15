@@ -18,33 +18,36 @@ class AppointmentSyncService
     ) {}
 
     /**
-     * Book or sync an appointment from Bitrix24 to Unite EMR
+     * Book or sync an appointment from Bitrix24 to Unite EMR with 4-step trace logging
      */
     public function bookFromBitrix(Tenant $tenant, array $input): Appointment
     {
-        Log::info("[AppointmentSync] bookFromBitrix initiated for Tenant: {$tenant->name} (ID: {$tenant->id})", [
+        Log::info("[AppointmentSync][Step 1/4] Processing booking request for Tenant '{$tenant->name}' (ID: {$tenant->id})", [
+            'tenant_domain' => $tenant->b24_domain,
             'deal_id' => $input['b24_deal_id'] ?? null,
             'contact_id' => $input['b24_contact_id'] ?? null,
             'doctor' => $input['doctorname'] ?? $input['doctorid'],
             'clinic' => $input['clinicname'] ?? $input['clinicid'],
             'startdatetime' => $input['startdatetime'],
-            'patient' => ($input['firstname'] ?? '') . ' ' . ($input['lastname'] ?? ''),
+            'patient_name' => ($input['firstname'] ?? '') . ' ' . ($input['lastname'] ?? ''),
             'mobileno' => $input['mobileno'] ?? null,
+            'item_codes' => $input['itemcode'] ?? [],
         ]);
 
-        // 1. Call Unite EMR API to create appointment
+        // Step 2. Call Unite EMR API to create appointment
+        Log::info("[AppointmentSync][Step 2/4] Calling UniteClient::createAppointment...");
         $uniteResponse = $this->uniteClient->createAppointment($tenant, $input);
         $uniteData = $uniteResponse['Data'] ?? [];
         $uniteApptId = (string) ($uniteData['appointmentid'] ?? rand(10000000, 99999999));
         $uniteStatus = $uniteData['appointmentstatus'] ?? 'AAC';
 
-        Log::info("[AppointmentSync] Unite API appointment resolved", [
+        Log::info("[AppointmentSync][Step 2/4 COMPLETE] Unite EMR booking successful", [
             'unite_appointment_id' => $uniteApptId,
-            'status' => $uniteStatus,
-            'raw_response' => $uniteResponse,
+            'unite_status' => $uniteStatus,
+            'unite_response' => $uniteResponse,
         ]);
 
-        // 2. Parse start datetime
+        // Parse start datetime
         $startDt = null;
         try {
             $startDt = Carbon::createFromFormat('d-m-Y H:i', $input['startdatetime']);
@@ -52,7 +55,12 @@ class AppointmentSyncService
             $startDt = now();
         }
 
-        // 3. Save or update local appointment record
+        // Step 3. Save or update local appointment record
+        Log::info("[AppointmentSync][Step 3/4] Persisting appointment record in local database...", [
+            'tenant_id' => $tenant->id,
+            'unite_appointment_id' => $uniteApptId,
+        ]);
+
         $appointment = Appointment::updateOrCreate(
             [
                 'tenant_id' => $tenant->id,
@@ -86,12 +94,12 @@ class AppointmentSyncService
             ]
         );
 
-        Log::info("[AppointmentSync] Local appointment model saved", [
-            'id' => $appointment->id,
+        Log::info("[AppointmentSync][Step 3/4 COMPLETE] Local appointment saved", [
+            'local_id' => $appointment->id,
             'unite_appointment_id' => $appointment->unite_appointment_id,
         ]);
 
-        // 4. Update Bitrix24 Deal if linked
+        // Step 4. Update Bitrix24 Deal if linked
         if (!empty($input['b24_deal_id'])) {
             $dealId = $input['b24_deal_id'];
             $stage = BitrixService::STATUS_MAP[$uniteStatus]['stage'] ?? null;
@@ -107,28 +115,35 @@ class AppointmentSyncService
                 $fields['STAGE_ID'] = $stage;
             }
 
+            Log::info("[AppointmentSync][Step 4/4] Updating Bitrix24 Deal #{$dealId}...", [
+                'deal_id' => $dealId,
+                'fields' => $fields,
+            ]);
+
             try {
-                $this->bitrixService->updateDeal($tenant, $dealId, $fields);
-                Log::info("[AppointmentSync] Bitrix24 Deal #{$dealId} updated successfully", $fields);
+                $b24Res = $this->bitrixService->updateDeal($tenant, $dealId, $fields);
+                Log::info("[AppointmentSync][Step 4/4 COMPLETE] Bitrix24 Deal #{$dealId} updated successfully", [
+                    'response' => $b24Res,
+                ]);
             } catch (\Exception $e) {
-                Log::warning("[AppointmentSync] Failed to update Bitrix24 Deal #{$dealId}: " . $e->getMessage());
+                Log::warning("[AppointmentSync][Step 4/4 WARNING] Failed to update Bitrix24 Deal #{$dealId}: " . $e->getMessage());
             }
             
             try {
-                $this->bitrixService->addTimelineComment(
-                    $tenant,
-                    $dealId,
-                    "🩺 **Unite EMR Appointment Booked**\n" .
+                $comment = "🩺 **Unite EMR Appointment Booked**\n" .
                     "• Appointment ID: #{$uniteApptId}\n" .
                     "• Doctor: " . ($input['doctorname'] ?? $input['doctorid']) . "\n" .
                     "• Clinic: " . ($input['clinicname'] ?? $input['clinicid']) . "\n" .
                     "• Date/Time: {$input['startdatetime']}\n" .
-                    "• Status: " . (BitrixService::STATUS_MAP[$uniteStatus]['label'] ?? $uniteStatus)
-                );
-                Log::info("[AppointmentSync] Added timeline comment to Bitrix24 Deal #{$dealId}");
+                    "• Status: " . (BitrixService::STATUS_MAP[$uniteStatus]['label'] ?? $uniteStatus);
+
+                $this->bitrixService->addTimelineComment($tenant, $dealId, $comment);
+                Log::info("[AppointmentSync][Step 4/4 COMPLETE] Timeline comment posted to Bitrix24 Deal #{$dealId}");
             } catch (\Exception $e) {
-                Log::warning("[AppointmentSync] Failed to add timeline comment to Bitrix24 Deal #{$dealId}: " . $e->getMessage());
+                Log::warning("[AppointmentSync][Step 4/4 WARNING] Failed to add timeline comment to Bitrix24 Deal #{$dealId}: " . $e->getMessage());
             }
+        } else {
+            Log::info("[AppointmentSync][Step 4/4 SKIPPED] No Bitrix24 deal ID provided in request");
         }
 
         return $appointment;

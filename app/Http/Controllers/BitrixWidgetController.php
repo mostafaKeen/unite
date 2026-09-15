@@ -26,8 +26,13 @@ class BitrixWidgetController extends Controller
      */
     public function show(Request $request, Tenant $tenant): Response
     {
-        Log::info("Bitrix24 Widget view requested for Tenant {$tenant->name}", [
+        $hasUniteCredentials = (!empty($tenant->unite_app_id) || env('UNITE_APP_ID')) && 
+                               (!empty($tenant->unite_app_key) || env('UNITE_APP_KEY'));
+
+        Log::info("[Bitrix Widget] Tab Widget view requested for Tenant '{$tenant->name}' (ID: {$tenant->id})", [
             'method' => $request->method(),
+            'b24_domain' => $tenant->b24_domain,
+            'has_unite_credentials' => $hasUniteCredentials,
             'placement' => $request->input('PLACEMENT'),
             'placement_options' => $request->input('PLACEMENT_OPTIONS'),
             'query' => $request->query(),
@@ -43,9 +48,17 @@ class BitrixWidgetController extends Controller
         }
 
         // Fetch directories from cache or Unite API
-        $clinics = $this->uniteClient->getClinics($tenant);
-        $doctors = $this->uniteClient->getDoctors($tenant);
-        $items = $this->uniteClient->getItemDetails($tenant);
+        $clinics = [];
+        $doctors = [];
+        $items = [];
+
+        try {
+            $clinics = $this->uniteClient->getClinics($tenant);
+            $doctors = $this->uniteClient->getDoctors($tenant);
+            $items = $this->uniteClient->getItemDetails($tenant);
+        } catch (\Exception $e) {
+            Log::warning("[Bitrix Widget] Directory loading warning for {$tenant->name}: {$e->getMessage()}");
+        }
 
         // Fetch existing appointment if already linked to this entity
         $existingAppointment = null;
@@ -69,7 +82,7 @@ class BitrixWidgetController extends Controller
                     ];
                 }
             } catch (\Exception $e) {
-                // Non-blocking
+                Log::info("[Bitrix Widget] Non-blocking Bitrix deal fetch error: " . $e->getMessage());
             }
         }
 
@@ -83,6 +96,7 @@ class BitrixWidgetController extends Controller
             'existingAppointment' => $existingAppointment,
             'statusMap' => BitrixService::STATUS_MAP,
             'placement' => $placement,
+            'hasUniteCredentials' => $hasUniteCredentials,
         ]);
     }
 
