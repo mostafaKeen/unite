@@ -161,6 +161,7 @@ class BitrixWidgetController extends Controller
         try {
             $validated = $request->validate([
                 'b24_deal_id' => 'nullable|string',
+                'b24_lead_id' => 'nullable|string',
                 'b24_contact_id' => 'nullable|string',
                 'clinicid' => 'required|string',
                 'clinicname' => 'nullable|string',
@@ -187,15 +188,22 @@ class BitrixWidgetController extends Controller
 
             $appointment = $this->syncService->bookFromBitrix($tenant, $validated);
 
+            $isPendingSync = $appointment->status === 'pending_emr_sync';
+            $message = $isPendingSync
+                ? 'Appointment booked in CRM! EMR sync pending vendor database configuration.'
+                : 'Appointment successfully booked in Unite EMR';
+
             Log::info("[Bitrix Widget] Appointment booking completed successfully", [
                 'appointment_id' => $appointment->id,
                 'unite_appointment_id' => $appointment->unite_appointment_id,
                 'status' => $appointment->status,
+                'is_pending_sync' => $isPendingSync,
             ]);
 
             return response()->json([
                 'success' => true,
-                'message' => 'Appointment successfully booked in Unite EMR',
+                'emr_sync_pending' => $isPendingSync,
+                'message' => $message,
                 'appointment' => $appointment,
             ]);
         } catch (\Illuminate\Validation\ValidationException $ve) {

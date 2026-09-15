@@ -256,7 +256,7 @@ export default function DealTabWidget({
             if (json.success && json.appointment) {
                 setAppointment(json.appointment);
                 setShowBookingForm(false);
-                setSuccessMessage('Appointment booked and synced successfully with Unite EMR!');
+                setSuccessMessage(json.message || 'Appointment booked and scheduled successfully!');
             } else {
                 setErrorMessage(json.message || 'Failed to schedule appointment.');
             }

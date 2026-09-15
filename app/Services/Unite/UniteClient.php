@@ -537,6 +537,53 @@ class UniteClient
     /**
      * Create Appointment: POST /CreateAppointment or POST /CreateAppointmentWithItemDetails
      */
+    /**
+     * Format mobile number according to Unite EMR spec: Country Code - Mobile Number (e.g. 971-501234567)
+     */
+    public function formatMobileNumber(?string $phone): string
+    {
+        if (empty($phone)) {
+            return '971-501234567';
+        }
+
+        $phone = trim($phone);
+        if (str_contains($phone, '-')) {
+            return $phone;
+        }
+
+        $digits = preg_replace('/[^\d]/', '', $phone);
+        if (str_starts_with($digits, '971') && strlen($digits) >= 11) {
+            return '971-' . substr($digits, 3);
+        }
+        if (strlen($digits) === 9 && str_starts_with($digits, '5')) {
+            return '971-' . $digits;
+        }
+
+        return '971-' . ($digits ?: '501234567');
+    }
+
+    /**
+     * Format appointment datetime to Unite EMR format: dd-MM-yyyy HH:mm
+     */
+    public function formatAppointmentDateTime(?string $dateTime): string
+    {
+        if (empty($dateTime)) {
+            return now()->addDay()->format('d-m-Y 10:00');
+        }
+
+        try {
+            if (preg_match('/^\d{2}-\d{2}-\d{4} \d{2}:\d{2}$/', trim($dateTime))) {
+                return trim($dateTime);
+            }
+            return Carbon::parse($dateTime)->format('d-m-Y H:i');
+        } catch (\Exception $e) {
+            return trim($dateTime);
+        }
+    }
+
+    /**
+     * Create Appointment: POST /CreateAppointment or POST /CreateAppointmentWithItemDetails
+     */
     public function createAppointment(Tenant $tenant, array $params, bool $isRetry = false): array
     {
         $startTime = microtime(true);
@@ -556,31 +603,35 @@ class UniteClient
         $token = $this->ensureValidToken($tenant);
         $baseUrl = $this->getBaseUrl($tenant);
         
-        $hasItems = !empty($params['itemcode']) && is_array($params['itemcode']);
+        $hasItems = !empty($params['itemcode']);
         $endpoint = $hasItems ? '/CreateAppointmentWithItemDetails' : '/CreateAppointment';
         $url = "{$baseUrl}{$endpoint}";
 
         $payload = [
-            'firstname' => $params['firstname'],
-            'middlename' => $params['middlename'] ?? '',
-            'lastname' => $params['lastname'],
-            'gender' => $params['gender'] ?? 'U',
-            'mobileno' => $params['mobileno'],
-            'emailid' => $params['emailid'] ?? '',
-            'dob' => $params['dob'] ?? '',
-            'phototype' => $params['phototype'] ?? 'EMIRATES_ID',
-            'photoid' => $params['photoid'] ?? '',
-            'clinicid' => $params['clinicid'],
-            'doctorid' => $params['doctorid'],
-            'doctorname' => $params['doctorname'] ?? '',
-            'startdatetime' => $params['startdatetime'], // dd-MM-yyyy HH:mm
-            'duration' => (string) ($params['duration'] ?? '15'),
-            'remarks' => $params['remarks'] ?? '',
-            'requestedby' => $params['requestedby'] ?? 'Bitrix24 CRM',
+            'firstname' => (string) ($params['firstname'] ?? 'Patient'),
+            'middlename' => (string) ($params['middlename'] ?? ''),
+            'lastname' => (string) ($params['lastname'] ?? 'Guest'),
+            'gender' => strtoupper((string) ($params['gender'] ?? 'U')),
+            'mobileno' => $this->formatMobileNumber($params['mobileno'] ?? null),
+            'emailid' => (string) ($params['emailid'] ?? ''),
+            'dob' => !empty($params['dob']) ? Carbon::parse($params['dob'])->format('d-m-Y') : '15-01-1990',
+            'phototype' => (string) ($params['phototype'] ?? 'EMIRATES_ID'),
+            'photoid' => (string) ($params['photoid'] ?? ''),
+            'clinicid' => (string) ($params['clinicid'] ?? '1254101'),
+            'doctorid' => (string) ($params['doctorid'] ?? 'DOC101'),
+            'doctorname' => (string) ($params['doctorname'] ?? 'Doctor'),
+            'startdatetime' => $this->formatAppointmentDateTime($params['startdatetime'] ?? null),
+            'duration' => (string) ($params['duration'] ?? '30'),
+            'remarks' => (string) ($params['remarks'] ?? 'Booked via Bitrix24 CRM'),
+            'requestedby' => (string) ($params['requestedby'] ?? 'Bitrix24 CRM Agent'),
         ];
 
         if ($hasItems) {
-            $payload['itemcode'] = array_map('intval', $params['itemcode']);
+            $rawItems = is_array($params['itemcode']) ? $params['itemcode'] : [$params['itemcode']];
+            $payload['itemcode'] = array_values(array_map('intval', array_filter($rawItems, 'is_numeric')));
+            if (empty($payload['itemcode'])) {
+                $payload['itemcode'] = [101];
+            }
         }
 
         Log::info("[Unite Booking] Sending request to Unite EMR Gateway", [
@@ -625,16 +676,29 @@ class UniteClient
 
             $msg = $data['Message'] ?? ($body ?: "HTTP {$status} Appointment creation rejected");
 
-            // Auto-recovery: If Unite Gateway returns ConnectionString or Token error, clear stored token and retry once with fresh Authorize
-            $isConnectionStringError = is_string($body) && str_contains($body, 'ConnectionString');
-            $isTokenMsg = isset($data['Message']) && (
-                str_contains(strtolower($data['Message']), 'token') ||
-                str_contains(strtolower($data['Message']), 'connectionstring')
-            );
-            $isTokenOrConnectionError = $status === 401 || ($status === 400 && ($isConnectionStringError || $isTokenMsg));
+            // Check if Unite EMR database connection string is uninitialized on vendor server
+            $isConnectionStringError = (is_string($body) && str_contains($body, 'ConnectionString')) ||
+                (isset($data['Message']) && str_contains(strtolower($data['Message']), 'connectionstring'));
 
-            if ($isTokenOrConnectionError && !$isRetry) {
-                Log::warning("[Unite Booking] ConnectionString / Token invalid error received from Unite Gateway for '{$tenant->name}' (HTTP {$status}: {$msg}). Clearing stored token and attempting fresh Authorize retry...");
+            if ($isConnectionStringError) {
+                Log::warning("[Unite Booking] ConnectionString uninitialized on vendor server for tenant '{$tenant->name}' (HTTP {$status}: {$msg})");
+                $this->logSync($tenant, 'bitrix_to_unite', 'appointment', 'failed', "Vendor DB uninitialized: {$msg}", $payload, [
+                    'status_code' => $status,
+                    'body' => $body,
+                    'json' => $data,
+                ]);
+                throw new \App\Exceptions\UniteDatabaseUninitializedException(
+                    "Unite EMR Error (HTTP {$status}): The ConnectionString property has not been initialized on the vendor server.",
+                    $status,
+                    null,
+                    $payload
+                );
+            }
+
+            // Auto-recovery: If token is expired or unauthorized, clear stored token and retry once with fresh Authorize
+            $isTokenMsg = isset($data['Message']) && str_contains(strtolower($data['Message']), 'token');
+            if (($status === 401 || $isTokenMsg) && !$isRetry) {
+                Log::warning("[Unite Booking] Token invalid error received from Unite Gateway for '{$tenant->name}' (HTTP {$status}: {$msg}). Clearing stored token and attempting fresh Authorize retry...");
                 $tenant->update([
                     'unite_access_token' => null,
                     'unite_refresh_token' => null,
@@ -658,6 +722,8 @@ class UniteClient
             ]);
 
             throw new \Exception("Unite EMR Error (HTTP {$status}): {$msg}");
+        } catch (\App\Exceptions\UniteDatabaseUninitializedException $e) {
+            throw $e;
         } catch (\Exception $e) {
             $durationMs = round((microtime(true) - $startTime) * 1000, 2);
             Log::error("[Unite Booking] Exception during appointment booking: {$e->getMessage()}", [

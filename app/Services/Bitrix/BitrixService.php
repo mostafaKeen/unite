@@ -154,14 +154,14 @@ class BitrixService
     }
 
     /**
-     * Post a comment in the Bitrix24 Deal Timeline
+     * Post a comment in the Bitrix24 Deal or Lead Timeline
      */
-    public function addTimelineComment(Tenant $tenant, string|int $dealId, string $comment): void
+    public function addTimelineComment(Tenant $tenant, string|int $entityId, string $comment, string $entityType = 'deal'): void
     {
         $this->call($tenant, 'crm.timeline.comment.add', [
             'fields' => [
-                'ENTITY_ID' => $dealId,
-                'ENTITY_TYPE' => 'deal',
+                'ENTITY_ID' => $entityId,
+                'ENTITY_TYPE' => strtolower($entityType) === 'lead' ? 'lead' : 'deal',
                 'COMMENT' => $comment,
             ]
         ]);
