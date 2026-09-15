@@ -75,6 +75,7 @@ class SyncAppointmentToEmrJob implements ShouldQueue
             'requestedby' => $appointment->requested_by ?? 'Bitrix24 CRM Agent',
             'itemcode' => $appointment->item_codes ?: [101],
             'b24_deal_id' => $appointment->b24_deal_id,
+            'b24_lead_id' => $appointment->b24_lead_id,
         ];
 
         try {
@@ -101,6 +102,9 @@ class SyncAppointmentToEmrJob implements ShouldQueue
 
                 if ($appointment->b24_deal_id) {
                     $bitrixService->addTimelineComment($tenant, $appointment->b24_deal_id, $comment, 'deal');
+                }
+                if ($appointment->b24_lead_id) {
+                    $bitrixService->addTimelineComment($tenant, $appointment->b24_lead_id, $comment, 'lead');
                 }
             }
         } catch (UniteDatabaseUninitializedException $e) {

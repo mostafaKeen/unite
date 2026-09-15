@@ -15,6 +15,7 @@ class Appointment extends Model
         'tenant_id',
         'unite_appointment_id',
         'b24_deal_id',
+        'b24_lead_id',
         'b24_contact_id',
         'clinic_id',
         'clinic_name',

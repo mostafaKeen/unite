@@ -9,6 +9,7 @@ use App\Services\Unite\UniteClient;
 use App\Services\Bitrix\BitrixService;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 
 class AppointmentSyncService
 {
@@ -87,6 +88,7 @@ class AppointmentSyncService
             ],
             [
                 'b24_deal_id' => $input['b24_deal_id'] ?? null,
+                'b24_lead_id' => $input['b24_lead_id'] ?? null,
                 'b24_contact_id' => $input['b24_contact_id'] ?? null,
                 'clinic_id' => $input['clinicid'],
                 'clinic_name' => $input['clinicname'] ?? null,

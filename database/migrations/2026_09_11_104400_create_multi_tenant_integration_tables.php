@@ -54,6 +54,7 @@ return new class extends Migration
             $table->foreignUuid('tenant_id')->constrained('tenants')->cascadeOnDelete();
             $table->string('unite_appointment_id')->nullable()->index();
             $table->string('b24_deal_id')->nullable()->index();
+            $table->string('b24_lead_id')->nullable()->index();
             $table->string('b24_contact_id')->nullable()->index();
             
             // Clinic & Doctor
