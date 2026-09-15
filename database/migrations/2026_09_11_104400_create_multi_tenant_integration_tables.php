@@ -79,7 +79,7 @@ return new class extends Migration
             // Appointment schedule
             $table->dateTime('start_datetime');
             $table->integer('duration_minutes')->default(15);
-            $table->string('status', 10)->default('AAC'); // AAC, ACF, APH, CNR, CVI, YTC, NSW
+            $table->string('status', 50)->default('AAC'); // AAC, ACF, APH, CNR, CVI, YTC, NSW, pending_emr_sync
             $table->string('status_description')->nullable();
             $table->text('remarks')->nullable();
             $table->string('requested_by')->nullable();
