@@ -180,24 +180,36 @@ export default function DealTabWidget({
     const fetchSlots = async (clinicId: string, doctorId: string, date: string) => {
         setLoadingSlots(true);
         try {
-            const res = await fetch(`/b24/widget/deal-tab/${tenant.id}/slots?clinic_id=${clinicId}&doctor_id=${doctorId}&date=${date}`);
-            const json = await res.json();
-            if (json.success && json.data) {
-                setAvailableSlots(json.data);
-                // Set first slot if available
-                const dates = Object.keys(json.data);
-                if (dates.length > 0) {
-                    const firstDate = dates[0];
-                    if (json.data[firstDate]?.length > 0) {
-                        setSelectedSlotDate(firstDate);
-                        setSelectedSlotTime(json.data[firstDate][0]);
+            const res = await fetch(`/b24/widget/deal-tab/${tenant.id}/slots?clinic_id=${encodeURIComponent(clinicId)}&doctor_id=${encodeURIComponent(doctorId)}&date=${encodeURIComponent(date)}`, {
+                headers: {
+                    'Accept': 'application/json',
+                },
+            });
+
+            if (!res.ok) {
+                console.warn(`[Slots] HTTP ${res.status} received when fetching slots`);
+            }
+
+            const contentType = res.headers.get('content-type');
+            if (contentType && contentType.includes('application/json')) {
+                const json = await res.json();
+                if (json.success && json.data) {
+                    setAvailableSlots(json.data);
+                    // Set first slot if available
+                    const dates = Object.keys(json.data);
+                    if (dates.length > 0) {
+                        const firstDate = dates[0];
+                        if (json.data[firstDate]?.length > 0) {
+                            setSelectedSlotDate(firstDate);
+                            setSelectedSlotTime(json.data[firstDate][0]);
+                        } else {
+                            setSelectedSlotDate('');
+                            setSelectedSlotTime('');
+                        }
                     } else {
                         setSelectedSlotDate('');
                         setSelectedSlotTime('');
                     }
-                } else {
-                    setSelectedSlotDate('');
-                    setSelectedSlotTime('');
                 }
             }
         } catch (e) {

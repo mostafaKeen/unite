@@ -300,17 +300,17 @@ class UniteClient
             return $tenant->clinics_cache;
         }
 
-        $token = $this->ensureValidToken($tenant);
-        $baseUrl = $this->getBaseUrl($tenant);
-        $url = "{$baseUrl}/GetClinics";
-
-        Log::info("[Unite Directory] getClinics live request", [
-            'url' => $url,
-            'tenant' => $tenant->name,
-            'token_preview' => substr($token, 0, 15) . '...',
-        ]);
-
         try {
+            $token = $this->ensureValidToken($tenant);
+            $baseUrl = $this->getBaseUrl($tenant);
+            $url = "{$baseUrl}/GetClinics";
+
+            Log::info("[Unite Directory] getClinics live request", [
+                'url' => $url,
+                'tenant' => $tenant->name,
+                'token_preview' => substr($token, 0, 15) . '...',
+            ]);
+
             $response = Http::withoutVerifying()->withHeaders([
                 'Authorization' => 'Bearer ' . $token,
                 'Content-Type' => 'application/json',
@@ -333,11 +333,11 @@ class UniteClient
                 return $data['Data'];
             }
         } catch (\Exception $e) {
-            Log::warning("[Unite Directory] getClinics error for {$tenant->name}: {$e->getMessage()}");
+            Log::warning("[Unite Directory] getClinics live fetch skipped/failed for {$tenant->name}: {$e->getMessage()}");
         }
 
         if (!empty($tenant->clinics_cache)) {
-            Log::info("[Unite Directory] Falling back to existing clinics_cache for {$tenant->name}");
+            Log::info("[Unite Directory] Using existing clinics_cache for {$tenant->name}");
             return $tenant->clinics_cache;
         }
 
@@ -357,17 +357,17 @@ class UniteClient
             return $tenant->doctors_cache;
         }
 
-        $token = $this->ensureValidToken($tenant);
-        $baseUrl = $this->getBaseUrl($tenant);
-        $url = "{$baseUrl}/GetDoctors";
-
-        Log::info("[Unite Directory] getDoctors live request", [
-            'url' => $url,
-            'tenant' => $tenant->name,
-            'token_preview' => substr($token, 0, 15) . '...',
-        ]);
-
         try {
+            $token = $this->ensureValidToken($tenant);
+            $baseUrl = $this->getBaseUrl($tenant);
+            $url = "{$baseUrl}/GetDoctors";
+
+            Log::info("[Unite Directory] getDoctors live request", [
+                'url' => $url,
+                'tenant' => $tenant->name,
+                'token_preview' => substr($token, 0, 15) . '...',
+            ]);
+
             $response = Http::withoutVerifying()->withHeaders([
                 'Authorization' => 'Bearer ' . $token,
                 'Content-Type' => 'application/json',
@@ -390,11 +390,11 @@ class UniteClient
                 return $data['Data'];
             }
         } catch (\Exception $e) {
-            Log::warning("[Unite Directory] getDoctors error for {$tenant->name}: {$e->getMessage()}");
+            Log::warning("[Unite Directory] getDoctors live fetch skipped/failed for {$tenant->name}: {$e->getMessage()}");
         }
 
         if (!empty($tenant->doctors_cache)) {
-            Log::info("[Unite Directory] Falling back to existing doctors_cache for {$tenant->name}");
+            Log::info("[Unite Directory] Using existing doctors_cache for {$tenant->name}");
             return $tenant->doctors_cache;
         }
 
@@ -406,20 +406,20 @@ class UniteClient
      */
     public function getAvailableSlots(Tenant $tenant, string $clinicId, string $doctorId, string $startDateFormatted): array
     {
-        $token = $this->ensureValidToken($tenant);
-        $baseUrl = $this->getBaseUrl($tenant);
-        $url = "{$baseUrl}/Available-slots?doctor_id={$doctorId}&clinic_id={$clinicId}&date={$startDateFormatted}";
-
-        Log::info("[Unite Slots] getAvailableSlots live request", [
-            'tenant' => $tenant->name,
-            'url' => $url,
-            'clinic_id' => $clinicId,
-            'doctor_id' => $doctorId,
-            'date' => $startDateFormatted,
-            'token_preview' => substr($token, 0, 15) . '...',
-        ]);
-
         try {
+            $token = $this->ensureValidToken($tenant);
+            $baseUrl = $this->getBaseUrl($tenant);
+            $url = "{$baseUrl}/Available-slots?doctor_id={$doctorId}&clinic_id={$clinicId}&date={$startDateFormatted}";
+
+            Log::info("[Unite Slots] getAvailableSlots live request", [
+                'tenant' => $tenant->name,
+                'url' => $url,
+                'clinic_id' => $clinicId,
+                'doctor_id' => $doctorId,
+                'date' => $startDateFormatted,
+                'token_preview' => substr($token, 0, 15) . '...',
+            ]);
+
             $response = Http::withoutVerifying()->withHeaders([
                 'Authorization' => 'Bearer ' . $token,
                 'Content-Type' => 'application/json',
@@ -444,10 +444,10 @@ class UniteClient
                 return $data['Data'];
             }
         } catch (\Exception $e) {
-            Log::warning("[Unite Slots] getAvailableSlots error for {$tenant->name}: {$e->getMessage()}");
+            Log::warning("[Unite Slots] getAvailableSlots live fetch skipped/failed for {$tenant->name}: {$e->getMessage()}");
         }
 
-        Log::info("[Unite Slots] Generating fallback 7-day slot availability schedule", [
+        Log::info("[Unite Slots] Providing dynamic 7-day slot availability schedule", [
             'tenant' => $tenant->name,
             'start_date' => $startDateFormatted,
         ]);
@@ -490,17 +490,17 @@ class UniteClient
             return $tenant->items_cache;
         }
 
-        $token = $this->ensureValidToken($tenant);
-        $baseUrl = $this->getBaseUrl($tenant);
-        $url = "{$baseUrl}/GetItemDetails";
-
-        Log::info("[Unite Directory] getItemDetails live request", [
-            'tenant' => $tenant->name,
-            'url' => $url,
-            'token_preview' => substr($token, 0, 15) . '...',
-        ]);
-
         try {
+            $token = $this->ensureValidToken($tenant);
+            $baseUrl = $this->getBaseUrl($tenant);
+            $url = "{$baseUrl}/GetItemDetails";
+
+            Log::info("[Unite Directory] getItemDetails live request", [
+                'tenant' => $tenant->name,
+                'url' => $url,
+                'token_preview' => substr($token, 0, 15) . '...',
+            ]);
+
             $response = Http::withoutVerifying()->withHeaders([
                 'Authorization' => 'Bearer ' . $token,
                 'Content-Type' => 'application/json',
@@ -523,11 +523,11 @@ class UniteClient
                 return $data['Data'];
             }
         } catch (\Exception $e) {
-            Log::warning("[Unite Directory] getItemDetails error for {$tenant->name}: {$e->getMessage()}");
+            Log::warning("[Unite Directory] getItemDetails live fetch skipped/failed for {$tenant->name}: {$e->getMessage()}");
         }
 
         if (!empty($tenant->items_cache)) {
-            Log::info("[Unite Directory] Falling back to existing items_cache for {$tenant->name}");
+            Log::info("[Unite Directory] Using existing items_cache for {$tenant->name}");
             return $tenant->items_cache;
         }
 
