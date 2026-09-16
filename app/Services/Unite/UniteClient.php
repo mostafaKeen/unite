@@ -771,6 +771,17 @@ class UniteClient
                 return $this->createAppointment($tenant, $params, true);
             }
 
+            // Auto-recovery 2: If item code Foreign Key constraint failed on EMR SQL Server (ITEM_MSTR / FK_APPOINTM_RELATIONS_ITEM_MST)
+            $isItemFkError = (is_string($body) && (str_contains($body, 'FK_APPOINTM_RELATIONS_ITEM_MST') || str_contains($body, 'ITEM_MSTR') || str_contains($body, 'ITM_CODE'))) ||
+                (isset($data['Message']) && (str_contains(strtolower($data['Message']), 'item_mstr') || str_contains(strtolower($data['Message']), 'foreign key')));
+
+            if ($isItemFkError && !empty($params['itemcode']) && !$isRetry) {
+                Log::warning("[Unite Booking] Item code Foreign Key conflict on EMR SQL Server (code not found in dbo.ITEM_MSTR). Retrying appointment creation without itemcode via /CreateAppointment...");
+                $paramsWithoutItems = $params;
+                unset($paramsWithoutItems['itemcode']);
+                return $this->createAppointment($tenant, $paramsWithoutItems, true);
+            }
+
             $this->logSync($tenant, 'bitrix_to_unite', 'appointment', 'failed', "HTTP {$status}: {$msg}", $payload, [
                 'status_code' => $status,
                 'body' => $body,

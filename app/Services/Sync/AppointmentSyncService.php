@@ -64,6 +64,23 @@ class AppointmentSyncService
                 'temp_ref' => $uniteApptId,
                 'tenant' => $tenant->name,
             ]);
+        } catch (\Exception $e) {
+            $msg = $e->getMessage();
+            $isVendorError = str_contains($msg, 'Unite EMR Error') || str_contains($msg, 'FOREIGN KEY') || str_contains($msg, 'ConnectionString') || str_contains($msg, 'ITEM_MSTR') || str_contains($msg, 'APPOINTM');
+
+            if ($isVendorError) {
+                $uniteApptId = 'PENDING-' . now()->format('Ymd') . '-' . strtoupper(Str::random(4));
+                $uniteStatus = 'AAC';
+                $isEmrSyncPending = true;
+                $emrSyncMessage = "Unite EMR vendor database exception ({$msg}). Local booking recorded, background sync queued.";
+
+                Log::warning("[AppointmentSync][Step 2/4 FALLBACK] {$emrSyncMessage}", [
+                    'temp_ref' => $uniteApptId,
+                    'tenant' => $tenant->name,
+                ]);
+            } else {
+                throw $e;
+            }
         }
 
         // Parse start datetime
