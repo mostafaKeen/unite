@@ -163,20 +163,6 @@ export default function DealTabWidget({
         !selectedClinicId || (d.clinics && d.clinics.includes(selectedClinicId))
     );
 
-    // Console Debug Logging for Getting Data and Current User
-    useEffect(() => {
-        console.log('📌 [Bitrix Widget Data Loaded]', {
-            dealId,
-            leadId,
-            contactId,
-            patientDefaults,
-            activePatientData: patientData,
-        });
-        console.log('👤 [Bitrix Logged-in User]', {
-            requestedby: patientData.requestedby,
-        });
-    }, [patientDefaults, patientData.requestedby]);
-
     // Initialize Bitrix24 JS SDK & Client-Side Fallback Fetching
     useEffect(() => {
         const initBX24 = () => {
@@ -192,7 +178,6 @@ export default function DealTabWidget({
                         const userData = res.data();
                         if (userData) {
                             const userFullName = [userData.NAME, userData.LAST_NAME].filter(Boolean).join(' ');
-                            console.log('👤 [BX24 SDK] Current Logged-in User:', userFullName, userData);
                             if (userFullName) {
                                 setPatientData(prev => ({
                                     ...prev,
@@ -206,7 +191,6 @@ export default function DealTabWidget({
                 // Fetch entity data via BX24 JS SDK if patient fields are empty
                 try {
                     const placementInfo = window.BX24.placement.info();
-                    console.log('📌 [BX24 SDK] Placement Info:', placementInfo);
                     const entityId = placementInfo?.options?.ID || placementInfo?.options?.id || dealId || leadId || contactId;
 
                     if (entityId) {
@@ -217,7 +201,6 @@ export default function DealTabWidget({
                         window.BX24.callMethod(method, { id: entityId }, (res: any) => {
                             if (res && typeof res.data === 'function') {
                                 const data = res.data();
-                                console.log(`📋 [BX24 SDK] Fetched ${method} Entity Data:`, data);
                                 if (data) {
                                     const extractPhone = (arr: any) => Array.isArray(arr) && arr.length ? arr[0].VALUE : (typeof arr === 'string' ? arr : '');
                                     const extractEmail = (arr: any) => Array.isArray(arr) && arr.length ? arr[0].VALUE : (typeof arr === 'string' ? arr : '');
@@ -235,9 +218,7 @@ export default function DealTabWidget({
                             }
                         });
                     }
-                } catch (e) {
-                    console.log('[BX24 SDK] Placement info check exception:', e);
-                }
+                } catch (e) {}
             });
         };
 
@@ -258,7 +239,6 @@ export default function DealTabWidget({
     useEffect(() => {
         if (availableDoctors.length > 0 && (!selectedDoctorId || !availableDoctors.some(d => d.doctor_id === selectedDoctorId))) {
             const defaultDocId = availableDoctors[0].doctor_id;
-            console.log(`[Unite EMR Widget] Auto-selecting default doctor '${availableDoctors[0].name}' (ID: ${defaultDocId})`);
             setSelectedDoctorId(defaultDocId);
         }
     }, [selectedClinicId, availableDoctors]);
@@ -274,12 +254,6 @@ export default function DealTabWidget({
         setLoadingSlots(true);
         const slotUrl = `/b24/widget/deal-tab/${tenant.id}/slots?clinic_id=${encodeURIComponent(clinicId)}&doctor_id=${encodeURIComponent(doctorId)}&date=${encodeURIComponent(date)}`;
         
-        console.group('📅 [Unite EMR Widget] Fetching Available Time Slots');
-        console.log('Clinic ID:', clinicId);
-        console.log('Doctor ID:', doctorId);
-        console.log('Requested Date:', date);
-        console.log('Endpoint URL:', slotUrl);
-        
         try {
             const res = await fetch(slotUrl, {
                 headers: {
@@ -287,14 +261,9 @@ export default function DealTabWidget({
                 },
             });
 
-            if (!res.ok) {
-                console.warn(`[Slots] HTTP ${res.status} received when fetching slots`);
-            }
-
             const contentType = res.headers.get('content-type');
             if (contentType && contentType.includes('application/json')) {
                 const json = await res.json();
-                console.log('Slots Received Response:', json);
                 
                 if (json.success && json.data) {
                     setAvailableSlots(json.data);
@@ -305,7 +274,6 @@ export default function DealTabWidget({
                         if (json.data[firstDate]?.length > 0) {
                             setSelectedSlotDate(firstDate);
                             setSelectedSlotTime(json.data[firstDate][0]);
-                            console.log(`Selected slot: ${firstDate} at ${json.data[firstDate][0]}`);
                         } else {
                             setSelectedSlotDate('');
                             setSelectedSlotTime('');
@@ -317,9 +285,7 @@ export default function DealTabWidget({
                 }
             }
         } catch (e) {
-            console.error('Failed to fetch slots:', e);
         } finally {
-            console.groupEnd();
             setLoadingSlots(false);
         }
     };
@@ -350,13 +316,6 @@ export default function DealTabWidget({
             ...patientData,
         };
 
-        console.group('🚀 [Unite EMR Widget] Submitting Appointment Booking Request');
-        console.log('Selected Clinic:', selectedClinic);
-        console.log('Selected Doctor Object:', selectedDoctor);
-        console.log('Doctor ID Passed:', selectedDoctorId);
-        console.log('Doctor Name Passed:', selectedDoctor?.name || selectedDoctorId);
-        console.log('Full Request Payload:', payload);
-
         try {
             const res = await fetch(`/b24/widget/deal-tab/${tenant.id}/book`, {
                 method: 'POST',
@@ -365,22 +324,17 @@ export default function DealTabWidget({
             });
 
             const json = await res.json();
-            console.log('Server Booking Response:', json);
 
             if (json.success && json.appointment) {
-                console.log('✅ Booking Successfully Recorded:', json.appointment);
                 setAppointment(json.appointment);
                 setShowBookingForm(false);
                 setSuccessMessage(json.message || 'Appointment booked and scheduled successfully!');
             } else {
-                console.error('❌ Booking Rejected / Error:', json.message, json);
                 setErrorMessage(json.message || 'Failed to schedule appointment.');
             }
         } catch (err: any) {
-            console.error('💥 Booking Request Exception:', err);
             setErrorMessage('Network error during booking: ' + err.message);
         } finally {
-            console.groupEnd();
             setBookingLoading(false);
         }
     };
@@ -455,21 +409,45 @@ export default function DealTabWidget({
             ]
         };
 
+        console.group('🧾 [Unite EMR & Bitrix24 Invoice Creation]');
+        console.log('[Step 1/3] Preparing Invoice Line Items & Payment Payload', {
+            appointmentId: appointment.id,
+            uniteAppointmentId: appointment.unite_appointment_id,
+            leadId: leadId || null,
+            dealId: dealId || null,
+            contactId: contactId || null,
+            invoiceItems,
+            totalGross,
+            totalVat,
+            totalNet,
+            paymentMode: invoicePaymentMode,
+            paymentRef: invoiceRefNum,
+        });
+
         try {
+            console.log('[Step 2/3] Submitting Invoice payload to server endpoint...');
             const res = await fetch(`/b24/widget/deal-tab/${tenant.id}/invoice/${appointment.id}`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
                 body: JSON.stringify(payload),
             });
             const json = await res.json();
+            console.log('[Step 3/3] Server Invoice Response Received:', json);
+
             if (json.success && json.appointment) {
+                console.log('✅ [Invoice Success] Smart Invoice linked to Bitrix & Unite EMR:', json);
                 setAppointment(json.appointment);
                 setShowInvoiceModal(false);
                 setSuccessMessage(`Tax Invoice ${json.invoice_reference} generated and linked to Bitrix24!`);
+            } else {
+                console.error('❌ [Invoice Failed]', json.message, json);
+                setErrorMessage(json.message || 'Invoice generation failed.');
             }
         } catch (err: any) {
+            console.error('💥 [Invoice Exception]', err);
             setErrorMessage('Invoice generation failed: ' + err.message);
         } finally {
+            console.groupEnd();
             setInvoiceLoading(false);
         }
     };
