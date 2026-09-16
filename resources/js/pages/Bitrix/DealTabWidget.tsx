@@ -465,7 +465,7 @@ export default function DealTabWidget({
             if (json.success && json.appointment) {
                 setAppointment(json.appointment);
                 setShowInvoiceModal(false);
-                setSuccessMessage(`Tax Invoice ${json.invoice_reference} generated and linked to Bitrix Deal!`);
+                setSuccessMessage(`Tax Invoice ${json.invoice_reference} generated and linked to Bitrix24!`);
             }
         } catch (err: any) {
             setErrorMessage('Invoice generation failed: ' + err.message);

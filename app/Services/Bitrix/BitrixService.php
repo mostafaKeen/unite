@@ -182,6 +182,39 @@ class BitrixService
     }
 
     /**
+     * Create a Smart Invoice (crm.item.add with entityTypeId: 31) linked to Lead or Deal
+     */
+    public function createSmartInvoice(Tenant $tenant, array $invoiceParams): array
+    {
+        $fields = [
+            'title' => $invoiceParams['title'] ?? 'Unite EMR Medical Tax Invoice',
+            'opportunity' => $invoiceParams['opportunity'] ?? 0,
+            'currencyId' => 'AED',
+        ];
+
+        if (!empty($invoiceParams['lead_id'])) {
+            $fields['parentId1'] = (int) $invoiceParams['lead_id'];
+        }
+
+        if (!empty($invoiceParams['deal_id'])) {
+            $fields['parentId2'] = (int) $invoiceParams['deal_id'];
+        }
+
+        if (!empty($invoiceParams['contact_id'])) {
+            $fields['contactId'] = (int) $invoiceParams['contact_id'];
+        }
+
+        $res = $this->call($tenant, 'crm.item.add', [
+            'entityTypeId' => 31, // Smart Invoice
+            'fields' => $fields,
+        ]);
+
+        Log::info("Bitrix24 Smart Invoice created for tenant {$tenant->name}:", ['response' => $res, 'fields' => $fields]);
+
+        return $res;
+    }
+
+    /**
      * Post a comment in the Bitrix24 Deal or Lead Timeline
      */
     public function addTimelineComment(Tenant $tenant, string|int $entityId, string $comment, string $entityType = 'deal'): void

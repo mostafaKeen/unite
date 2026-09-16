@@ -287,16 +287,37 @@ class AppointmentSyncService
             'invoice_total' => $totalAmt,
         ]);
 
-        // Post timeline update in Bitrix
-        if ($appointment->b24_deal_id) {
-            $this->bitrixService->addTimelineComment(
-                $tenant,
-                $appointment->b24_deal_id,
-                "💰 **Unite EMR Invoice Generated**\n" .
-                "• Invoice Reference: {$invoiceRef}\n" .
-                "• Total Amount: AED " . number_format($totalAmt, 2) . "\n" .
-                "• Status: Paid & Registered"
-            );
+        // 2. Create linked Smart Invoice in Bitrix24 (Supports both Lead & Deal)
+        try {
+            $this->bitrixService->createSmartInvoice($tenant, [
+                'title' => "Unite EMR Medical Tax Invoice #{$invoiceRef}",
+                'opportunity' => $totalAmt,
+                'lead_id' => $appointment->b24_lead_id,
+                'deal_id' => $appointment->b24_deal_id,
+                'contact_id' => $appointment->b24_contact_id,
+            ]);
+        } catch (\Exception $e) {
+            Log::warning("[AppointmentSync] Smart Invoice creation warning: " . $e->getMessage());
+        }
+
+        $comment = "💰 **Unite EMR Invoice Generated**\n" .
+            "• Invoice Reference: {$invoiceRef}\n" .
+            "• Total Amount: AED " . number_format($totalAmt, 2) . "\n" .
+            "• Status: Paid & Registered";
+
+        // 3. Post timeline update to Lead or Deal
+        if ($appointment->b24_lead_id) {
+            try {
+                $this->bitrixService->addTimelineComment($tenant, $appointment->b24_lead_id, $comment, 'lead');
+            } catch (\Exception $e) {
+                Log::warning("[AppointmentSync] Lead timeline comment warning: " . $e->getMessage());
+            }
+        } elseif ($appointment->b24_deal_id) {
+            try {
+                $this->bitrixService->addTimelineComment($tenant, $appointment->b24_deal_id, $comment, 'deal');
+            } catch (\Exception $e) {
+                Log::warning("[AppointmentSync] Deal timeline comment warning: " . $e->getMessage());
+            }
         }
 
         return [
