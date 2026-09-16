@@ -132,6 +132,29 @@ export default function DealTabWidget({
         !selectedClinicId || (d.clinics && d.clinics.includes(selectedClinicId))
     );
 
+    // Initial console debug group
+    useEffect(() => {
+        console.group('🏥 [Unite EMR Widget] Widget Initialized');
+        console.log('Tenant Details:', tenant);
+        console.log('Deal ID:', dealId);
+        console.log('Deal Context:', dealContext);
+        console.log('Clinics Loaded:', clinics);
+        console.log('Doctors Loaded:', doctors);
+        console.log('Medical Services Loaded:', items);
+        console.log('Existing Appointment:', initialAppointment);
+        console.groupEnd();
+    }, []);
+
+    // Console debug for Doctor filtering & selection
+    useEffect(() => {
+        console.group('👨‍⚕️ [Unite EMR Widget] Doctor Directory Filter');
+        console.log('Active Clinic ID:', selectedClinicId);
+        console.log('Total Doctors Count:', doctors.length);
+        console.log('Filtered Doctors for Active Clinic:', availableDoctors);
+        console.log('Currently Selected Doctor ID:', selectedDoctorId);
+        console.groupEnd();
+    }, [selectedClinicId, doctors, availableDoctors, selectedDoctorId]);
+
     // Initialize Bitrix24 JS SDK iframe resize
     useEffect(() => {
         const scriptId = 'bitrix-js-sdk';
@@ -166,7 +189,9 @@ export default function DealTabWidget({
     // Default doctor if current doctor not available for selected clinic
     useEffect(() => {
         if (availableDoctors.length > 0 && (!selectedDoctorId || !availableDoctors.some(d => d.doctor_id === selectedDoctorId))) {
-            setSelectedDoctorId(availableDoctors[0].doctor_id);
+            const defaultDocId = availableDoctors[0].doctor_id;
+            console.log(`[Unite EMR Widget] Auto-selecting default doctor '${availableDoctors[0].name}' (ID: ${defaultDocId})`);
+            setSelectedDoctorId(defaultDocId);
         }
     }, [selectedClinicId, availableDoctors]);
 
@@ -179,8 +204,16 @@ export default function DealTabWidget({
 
     const fetchSlots = async (clinicId: string, doctorId: string, date: string) => {
         setLoadingSlots(true);
+        const slotUrl = `/b24/widget/deal-tab/${tenant.id}/slots?clinic_id=${encodeURIComponent(clinicId)}&doctor_id=${encodeURIComponent(doctorId)}&date=${encodeURIComponent(date)}`;
+        
+        console.group('📅 [Unite EMR Widget] Fetching Available Time Slots');
+        console.log('Clinic ID:', clinicId);
+        console.log('Doctor ID:', doctorId);
+        console.log('Requested Date:', date);
+        console.log('Endpoint URL:', slotUrl);
+        
         try {
-            const res = await fetch(`/b24/widget/deal-tab/${tenant.id}/slots?clinic_id=${encodeURIComponent(clinicId)}&doctor_id=${encodeURIComponent(doctorId)}&date=${encodeURIComponent(date)}`, {
+            const res = await fetch(slotUrl, {
                 headers: {
                     'Accept': 'application/json',
                 },
@@ -193,6 +226,8 @@ export default function DealTabWidget({
             const contentType = res.headers.get('content-type');
             if (contentType && contentType.includes('application/json')) {
                 const json = await res.json();
+                console.log('Slots Received Response:', json);
+                
                 if (json.success && json.data) {
                     setAvailableSlots(json.data);
                     // Set first slot if available
@@ -202,6 +237,7 @@ export default function DealTabWidget({
                         if (json.data[firstDate]?.length > 0) {
                             setSelectedSlotDate(firstDate);
                             setSelectedSlotTime(json.data[firstDate][0]);
+                            console.log(`Selected slot: ${firstDate} at ${json.data[firstDate][0]}`);
                         } else {
                             setSelectedSlotDate('');
                             setSelectedSlotTime('');
@@ -215,6 +251,7 @@ export default function DealTabWidget({
         } catch (e) {
             console.error('Failed to fetch slots:', e);
         } finally {
+            console.groupEnd();
             setLoadingSlots(false);
         }
     };
@@ -244,6 +281,13 @@ export default function DealTabWidget({
             ...patientData,
         };
 
+        console.group('🚀 [Unite EMR Widget] Submitting Appointment Booking Request');
+        console.log('Selected Clinic:', selectedClinic);
+        console.log('Selected Doctor Object:', selectedDoctor);
+        console.log('Doctor ID Passed:', selectedDoctorId);
+        console.log('Doctor Name Passed:', selectedDoctor?.name || selectedDoctorId);
+        console.log('Full Request Payload:', payload);
+
         try {
             const res = await fetch(`/b24/widget/deal-tab/${tenant.id}/book`, {
                 method: 'POST',
@@ -252,17 +296,22 @@ export default function DealTabWidget({
             });
 
             const json = await res.json();
+            console.log('Server Booking Response:', json);
 
             if (json.success && json.appointment) {
+                console.log('✅ Booking Successfully Recorded:', json.appointment);
                 setAppointment(json.appointment);
                 setShowBookingForm(false);
                 setSuccessMessage(json.message || 'Appointment booked and scheduled successfully!');
             } else {
+                console.error('❌ Booking Rejected / Error:', json.message, json);
                 setErrorMessage(json.message || 'Failed to schedule appointment.');
             }
         } catch (err: any) {
+            console.error('💥 Booking Request Exception:', err);
             setErrorMessage('Network error during booking: ' + err.message);
         } finally {
+            console.groupEnd();
             setBookingLoading(false);
         }
     };
