@@ -105,6 +105,31 @@ class TenantController extends Controller
     }
 
     /**
+     * Remove the specified tenant from storage.
+     */
+    public function destroy(Tenant $tenant): JsonResponse
+    {
+        Log::info("[Tenant] Deleting tenant: {$tenant->name} (ID: {$tenant->id})");
+
+        try {
+            $tenantName = $tenant->name;
+            $tenant->delete();
+
+            return response()->json([
+                'success' => true,
+                'message' => "Tenant company '{$tenantName}' deleted successfully.",
+            ]);
+        } catch (\Exception $e) {
+            Log::error("[Tenant] Failed to delete tenant {$tenant->id}: {$e->getMessage()}");
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to delete tenant: ' . $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
      * Real-time connectivity test with Unite EMR
      */
     public function testUniteConnection(Tenant $tenant): JsonResponse

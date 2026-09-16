@@ -224,6 +224,40 @@ export default function Dashboard({
         }
     };
 
+    const [deletingTenantId, setDeletingTenantId] = useState<string | null>(null);
+
+    const handleDeleteTenant = async (tenant: Tenant) => {
+        if (!confirm(`Are you sure you want to delete "${tenant.name}"?\n\nThis will permanently remove the company tenant, its configuration, and associated data.`)) {
+            return;
+        }
+
+        setDeletingTenantId(tenant.id);
+        try {
+            const csrfToken = (document.querySelector('meta[name="csrf-token"]') as HTMLMetaElement)?.content || '';
+            const res = await fetch(`/tenants/${tenant.id}`, {
+                method: 'DELETE',
+                headers: {
+                    'Accept': 'application/json',
+                    'X-CSRF-TOKEN': csrfToken,
+                },
+            });
+            const data = await res.json();
+            if (data.success) {
+                setTenantsList(prev => prev.filter(t => t.id !== tenant.id));
+                if (editingTenant?.id === tenant.id) {
+                    setEditingTenant(null);
+                }
+                setActionMessage({ type: 'success', text: data.message || 'Tenant deleted successfully' });
+            } else {
+                alert(data.message || 'Failed to delete tenant');
+            }
+        } catch (err: any) {
+            alert('Error deleting tenant: ' + err.message);
+        } finally {
+            setDeletingTenantId(null);
+        }
+    };
+
     // Filter appointments
     const [searchTerm, setSearchTerm] = useState<string>('');
 
@@ -773,15 +807,28 @@ export default function Dashboard({
                                                 Manage Services ({t.items_cache?.length || 0})
                                             </button>
 
-                                            {/* Configure / Edit Tenant credentials button (Super Admin) */}
+                                            {/* Edit & Delete Tenant buttons (Super Admin) */}
                                             {currentUser.can_manage_tenants && (
-                                                <button
-                                                    onClick={() => openEditTenant(t)}
-                                                    className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold text-slate-700 dark:text-slate-200 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 transition-colors"
-                                                >
-                                                    <Settings className="w-3.5 h-3.5 text-[#00a5b5]" />
-                                                    Configure Keys
-                                                </button>
+                                                <>
+                                                    <button
+                                                        onClick={() => openEditTenant(t)}
+                                                        className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold text-slate-700 dark:text-slate-200 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 transition-colors"
+                                                        title="Edit Tenant Configuration"
+                                                    >
+                                                        <Edit2 className="w-3.5 h-3.5 text-[#00a5b5]" />
+                                                        Edit Tenant
+                                                    </button>
+
+                                                    <button
+                                                        disabled={deletingTenantId === t.id}
+                                                        onClick={() => handleDeleteTenant(t)}
+                                                        className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold text-rose-600 dark:text-rose-400 bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/50 dark:hover:bg-rose-900/40 border border-rose-200 dark:border-rose-900/60 transition-colors"
+                                                        title="Delete Tenant"
+                                                    >
+                                                        <Trash2 className="w-3.5 h-3.5" />
+                                                        {deletingTenantId === t.id ? 'Deleting...' : 'Delete'}
+                                                    </button>
+                                                </>
                                             )}
 
                                             <button
@@ -1648,22 +1695,32 @@ export default function Dashboard({
                                 </div>
                             </div>
 
-                            <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-100 dark:border-slate-800">
+                            <div className="flex items-center justify-between pt-4 border-t border-slate-100 dark:border-slate-800">
                                 <button
                                     type="button"
-                                    onClick={() => setEditingTenant(null)}
-                                    className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800"
+                                    onClick={() => handleDeleteTenant(editingTenant)}
+                                    className="px-3.5 py-2 rounded-xl text-xs font-semibold text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/60 border border-rose-200 dark:border-rose-900/40 flex items-center gap-1.5 transition-colors"
                                 >
-                                    Cancel
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                    Delete Tenant
                                 </button>
-                                <button
-                                    type="submit"
-                                    disabled={updatingTenantLoading}
-                                    className="px-5 py-2.5 rounded-xl text-xs font-bold text-white bg-[#00a5b5] hover:bg-[#008f9c] flex items-center gap-1.5 shadow-md shadow-[#00a5b5]/20"
-                                >
-                                    {updatingTenantLoading ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
-                                    Save Credentials
-                                </button>
+                                <div className="flex items-center gap-3">
+                                    <button
+                                        type="button"
+                                        onClick={() => setEditingTenant(null)}
+                                        className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800"
+                                    >
+                                        Cancel
+                                    </button>
+                                    <button
+                                        type="submit"
+                                        disabled={updatingTenantLoading}
+                                        className="px-5 py-2.5 rounded-xl text-xs font-bold text-white bg-[#00a5b5] hover:bg-[#008f9c] flex items-center gap-1.5 shadow-md shadow-[#00a5b5]/20"
+                                    >
+                                        {updatingTenantLoading ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
+                                        Save Changes
+                                    </button>
+                                </div>
                             </div>
                         </form>
                     </div>

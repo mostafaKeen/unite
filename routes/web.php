@@ -36,6 +36,7 @@ Route::middleware(['auth'])->group(function () {
     Route::prefix('tenants')->middleware([EnsureSuperAdmin::class])->group(function () {
         Route::post('/', [TenantController::class, 'store'])->name('tenants.store');
         Route::put('/{tenant}', [TenantController::class, 'update'])->name('tenants.update');
+        Route::delete('/{tenant}', [TenantController::class, 'destroy'])->name('tenants.destroy');
         Route::post('/{tenant}/bind-placements', [TenantController::class, 'registerBitrixPlacements'])->name('tenants.bind-placements');
     });
 
