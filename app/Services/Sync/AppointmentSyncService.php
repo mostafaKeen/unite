@@ -323,6 +323,7 @@ class AppointmentSyncService
         // Step 3: Create linked Smart Invoice in Bitrix24
         // Note: Invoices link to Deals via parentId2 (not Leads via parentId1 per Bitrix24 docs)
         $smartInvoiceResult = null;
+        $b24InvoiceError = null;
         try {
             $smartInvoiceParams = [
                 'title' => "Unite EMR Medical Tax Invoice #{$invoiceRef}",
@@ -333,19 +334,33 @@ class AppointmentSyncService
 
             Log::info("[Invoice][Step 3/4] Creating Bitrix24 Smart Invoice", [
                 'params' => $smartInvoiceParams,
+                'tenant_domain' => $tenant->b24_domain,
+                'has_access_token' => !empty($tenant->b24_access_token),
+                'has_refresh_token' => !empty($tenant->b24_refresh_token),
             ]);
 
             $smartInvoiceResult = $this->bitrixService->createSmartInvoice($tenant, $smartInvoiceParams);
 
-            Log::info("[Invoice][Step 3/4 COMPLETE] Bitrix24 Smart Invoice API response", [
-                'result' => $smartInvoiceResult,
-                'has_result_item' => isset($smartInvoiceResult['result']['item']),
-                'created_id' => $smartInvoiceResult['result']['item']['id'] ?? 'N/A',
-            ]);
+            // Check if the API returned an error (non-exception)
+            if (isset($smartInvoiceResult['error'])) {
+                $b24InvoiceError = ($smartInvoiceResult['error'] ?? '') . ': ' . ($smartInvoiceResult['error_description'] ?? 'Unknown');
+                Log::error("[Invoice][Step 3/4 FAILED] Bitrix24 API returned error", [
+                    'error' => $smartInvoiceResult['error'],
+                    'error_description' => $smartInvoiceResult['error_description'] ?? null,
+                    'full_response' => $smartInvoiceResult,
+                ]);
+            } else {
+                Log::info("[Invoice][Step 3/4 COMPLETE] Bitrix24 Smart Invoice API response", [
+                    'result' => $smartInvoiceResult,
+                    'has_result_item' => isset($smartInvoiceResult['result']['item']),
+                    'created_id' => $smartInvoiceResult['result']['item']['id'] ?? 'N/A',
+                ]);
+            }
         } catch (\Exception $e) {
-            Log::error("[Invoice][Step 3/4 FAILED] Smart Invoice creation error", [
+            $b24InvoiceError = $e->getMessage();
+            Log::error("[Invoice][Step 3/4 FAILED] Smart Invoice creation exception", [
                 'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString(),
+                'exception_class' => get_class($e),
             ]);
         }
 
@@ -376,6 +391,8 @@ class AppointmentSyncService
             'invoice_reference' => $invoiceRef,
             'total_amount' => $totalAmt,
             'smart_invoice_id' => $smartInvoiceResult['result']['item']['id'] ?? null,
+            'b24_invoice_error' => $b24InvoiceError,
+            'b24_invoice_response' => $smartInvoiceResult,
             'message' => $res['Message'] ?? 'Invoice created successfully',
         ];
     }

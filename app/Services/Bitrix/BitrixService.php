@@ -32,6 +32,13 @@ class BitrixService
 
         $url = $endpoint . $method . '?auth=' . urlencode($accessToken);
 
+        Log::info("[Bitrix API] Calling {$method}", [
+            'endpoint' => $endpoint,
+            'has_token' => !empty($accessToken) && $accessToken !== 'mock_b24_token' && $accessToken !== 'mock_refreshed_token',
+            'token_preview' => substr($accessToken, 0, 10) . '...',
+            'domain' => $tenant->b24_domain,
+        ]);
+
         try {
             $response = Http::timeout(12)->post($url, array_merge($params, [
                 'auth' => $accessToken,
@@ -39,28 +46,42 @@ class BitrixService
 
             $data = $response->json();
 
+            Log::info("[Bitrix API] Response for {$method}", [
+                'http_status' => $response->status(),
+                'has_result' => isset($data['result']),
+                'has_error' => isset($data['error']),
+                'error' => $data['error'] ?? null,
+                'error_description' => $data['error_description'] ?? null,
+            ]);
+
             if ($response->successful() && isset($data['result'])) {
                 return $data;
             }
 
-            // Check if token expired error
+            // Check if token expired error — auto-refresh and retry once
             if (isset($data['error']) && in_array($data['error'], ['expired_token', 'INVALID_CREDENTIALS'])) {
+                Log::info("[Bitrix API] Token expired for {$method}, refreshing...");
                 $newAccessToken = $this->refreshOAuthToken($tenant);
                 $retryUrl = $endpoint . $method . '?auth=' . urlencode($newAccessToken);
                 $retry = Http::timeout(12)->post($retryUrl, array_merge($params, [
                     'auth' => $newAccessToken,
                 ]));
-                return $retry->json();
+                $retryData = $retry->json();
+                Log::info("[Bitrix API] Retry response for {$method}", [
+                    'http_status' => $retry->status(),
+                    'has_result' => isset($retryData['result']),
+                    'error' => $retryData['error'] ?? null,
+                ]);
+                return $retryData ?: [];
             }
 
             return $data ?: [];
         } catch (\Exception $e) {
-            Log::warning("Bitrix24 call failed for {$method}: {$e->getMessage()}");
-            return [
-                'result' => true,
-                'simulated' => true,
-                'message' => "Simulated call to {$method}"
-            ];
+            Log::error("[Bitrix API] Exception calling {$method}: {$e->getMessage()}", [
+                'url' => $url,
+                'exception' => get_class($e),
+            ]);
+            throw $e;
         }
     }
 

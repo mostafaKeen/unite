@@ -432,13 +432,28 @@ export default function DealTabWidget({
                 body: JSON.stringify(payload),
             });
             const json = await res.json();
-            console.log('[Step 3/3] Server Invoice Response Received:', json);
+            console.log('[Step 3/3] Server Invoice Response:', json);
+
+            // Surface Bitrix24 Smart Invoice status
+            if (json.smart_invoice_id) {
+                console.log('✅ [Bitrix24 Smart Invoice Created] ID:', json.smart_invoice_id);
+            } else {
+                console.error('⚠️ [Bitrix24 Smart Invoice NOT Created]', {
+                    error: json.b24_invoice_error,
+                    apiResponse: json.b24_invoice_response,
+                });
+            }
 
             if (json.success && json.appointment) {
-                console.log('✅ [Invoice Success] Smart Invoice linked to Bitrix & Unite EMR:', json);
                 setAppointment(json.appointment);
                 setShowInvoiceModal(false);
-                setSuccessMessage(`Tax Invoice ${json.invoice_reference} generated and linked to Bitrix24!`);
+                const invoiceMsg = json.smart_invoice_id
+                    ? `Tax Invoice ${json.invoice_reference} created & linked to Bitrix24 (Invoice #${json.smart_invoice_id})`
+                    : `Tax Invoice ${json.invoice_reference} created in Unite EMR. Bitrix24 sync: ${json.b24_invoice_error || 'pending'}`;
+                setSuccessMessage(invoiceMsg);
+                if (json.b24_invoice_error) {
+                    setErrorMessage(`Bitrix24 Invoice Error: ${json.b24_invoice_error}`);
+                }
             } else {
                 console.error('❌ [Invoice Failed]', json.message, json);
                 setErrorMessage(json.message || 'Invoice generation failed.');
