@@ -182,7 +182,8 @@ class BitrixService
     }
 
     /**
-     * Create a Smart Invoice (crm.item.add with entityTypeId: 31) linked to Lead or Deal
+     * Create a Smart Invoice (crm.item.add with entityTypeId: 31) linked to Deal
+     * Note: Per Bitrix24 docs, invoices link to Deals via parentId2, not Leads via parentId1
      */
     public function createSmartInvoice(Tenant $tenant, array $invoiceParams): array
     {
@@ -190,26 +191,39 @@ class BitrixService
             'title' => $invoiceParams['title'] ?? 'Unite EMR Medical Tax Invoice',
             'opportunity' => $invoiceParams['opportunity'] ?? 0,
             'currencyId' => 'AED',
+            'isManualOpportunity' => 'Y',
         ];
 
-        if (!empty($invoiceParams['lead_id'])) {
-            $fields['parentId1'] = (int) $invoiceParams['lead_id'];
-        }
-
+        // Link to Deal via parentId2 (the only supported parent for invoices)
         if (!empty($invoiceParams['deal_id'])) {
             $fields['parentId2'] = (int) $invoiceParams['deal_id'];
         }
 
+        // Link contacts
         if (!empty($invoiceParams['contact_id'])) {
             $fields['contactId'] = (int) $invoiceParams['contact_id'];
+            $fields['contactIds'] = [(int) $invoiceParams['contact_id']];
         }
+
+        Log::info("[Invoice][Bitrix API] Calling crm.item.add for Smart Invoice", [
+            'tenant' => $tenant->name,
+            'entityTypeId' => 31,
+            'fields' => $fields,
+            'has_access_token' => !empty($tenant->b24_access_token),
+            'b24_domain' => $tenant->b24_domain,
+        ]);
 
         $res = $this->call($tenant, 'crm.item.add', [
             'entityTypeId' => 31, // Smart Invoice
             'fields' => $fields,
         ]);
 
-        Log::info("Bitrix24 Smart Invoice created for tenant {$tenant->name}:", ['response' => $res, 'fields' => $fields]);
+        Log::info("[Invoice][Bitrix API] crm.item.add response", [
+            'response' => $res,
+            'has_result' => isset($res['result']),
+            'has_error' => isset($res['error']),
+            'error_description' => $res['error_description'] ?? null,
+        ]);
 
         return $res;
     }

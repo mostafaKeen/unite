@@ -266,57 +266,108 @@ class AppointmentSyncService
      */
     public function generateInvoice(Tenant $tenant, Appointment $appointment, array $invoiceDetails, array $invoicePayments): array
     {
+        Log::info("[Invoice][Step 1/4] Starting invoice generation", [
+            'tenant' => $tenant->name,
+            'appointment_id' => $appointment->id,
+            'unite_appointment_id' => $appointment->unite_appointment_id,
+            'b24_lead_id' => $appointment->b24_lead_id,
+            'b24_deal_id' => $appointment->b24_deal_id,
+            'b24_contact_id' => $appointment->b24_contact_id,
+            'invoice_items_count' => count($invoiceDetails),
+            'payments_count' => count($invoicePayments),
+        ]);
+
         $payload = [
             'appointmentid' => (int) $appointment->unite_appointment_id,
             'invoiceDetails' => $invoiceDetails,
             'invoicePayments' => $invoicePayments,
         ];
 
-        $res = $this->uniteClient->createInvoice($tenant, $payload);
-        $invoiceRef = $res['Data']['invoice_ref'] ?? ('UCM/C/' . rand(1001000, 1009999));
+        // Step 1: Call Unite EMR to create invoice
+        $res = null;
+        $invoiceRef = null;
+        try {
+            $res = $this->uniteClient->createInvoice($tenant, $payload);
+            $invoiceRef = $res['Data']['invoice_ref'] ?? null;
+            Log::info("[Invoice][Step 1/4 COMPLETE] Unite EMR invoice response", [
+                'response' => $res,
+                'invoice_ref' => $invoiceRef,
+            ]);
+        } catch (\Exception $e) {
+            Log::warning("[Invoice][Step 1/4 WARNING] Unite EMR invoice call failed: " . $e->getMessage());
+        }
+
+        // Generate fallback ref if Unite EMR didn't return one
+        if (!$invoiceRef) {
+            $invoiceRef = 'UCM/C/' . rand(1001000, 1009999);
+            Log::info("[Invoice][Step 1/4] Using fallback invoice ref: {$invoiceRef}");
+        }
 
         $totalAmt = 0;
         foreach ($invoiceDetails as $item) {
             $totalAmt += (float) ($item['line_net_amt'] ?? $item['line_gross_amt'] ?? 0);
         }
 
+        // Step 2: Save invoice to local appointment record
         $appointment->update([
             'invoice_reference' => $invoiceRef,
             'invoice_details' => $invoiceDetails,
             'invoice_payments' => $invoicePayments,
             'invoice_total' => $totalAmt,
         ]);
+        Log::info("[Invoice][Step 2/4 COMPLETE] Local appointment updated with invoice", [
+            'invoice_reference' => $invoiceRef,
+            'total_amount' => $totalAmt,
+        ]);
 
-        // 2. Create linked Smart Invoice in Bitrix24 (Supports both Lead & Deal)
+        // Step 3: Create linked Smart Invoice in Bitrix24
+        // Note: Invoices link to Deals via parentId2 (not Leads via parentId1 per Bitrix24 docs)
+        $smartInvoiceResult = null;
         try {
-            $this->bitrixService->createSmartInvoice($tenant, [
+            $smartInvoiceParams = [
                 'title' => "Unite EMR Medical Tax Invoice #{$invoiceRef}",
                 'opportunity' => $totalAmt,
-                'lead_id' => $appointment->b24_lead_id,
                 'deal_id' => $appointment->b24_deal_id,
                 'contact_id' => $appointment->b24_contact_id,
+            ];
+
+            Log::info("[Invoice][Step 3/4] Creating Bitrix24 Smart Invoice", [
+                'params' => $smartInvoiceParams,
+            ]);
+
+            $smartInvoiceResult = $this->bitrixService->createSmartInvoice($tenant, $smartInvoiceParams);
+
+            Log::info("[Invoice][Step 3/4 COMPLETE] Bitrix24 Smart Invoice API response", [
+                'result' => $smartInvoiceResult,
+                'has_result_item' => isset($smartInvoiceResult['result']['item']),
+                'created_id' => $smartInvoiceResult['result']['item']['id'] ?? 'N/A',
             ]);
         } catch (\Exception $e) {
-            Log::warning("[AppointmentSync] Smart Invoice creation warning: " . $e->getMessage());
+            Log::error("[Invoice][Step 3/4 FAILED] Smart Invoice creation error", [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
         }
 
+        // Step 4: Post timeline comment
         $comment = "💰 **Unite EMR Invoice Generated**\n" .
             "• Invoice Reference: {$invoiceRef}\n" .
             "• Total Amount: AED " . number_format($totalAmt, 2) . "\n" .
             "• Status: Paid & Registered";
 
-        // 3. Post timeline update to Lead or Deal
-        if ($appointment->b24_lead_id) {
-            try {
-                $this->bitrixService->addTimelineComment($tenant, $appointment->b24_lead_id, $comment, 'lead');
-            } catch (\Exception $e) {
-                Log::warning("[AppointmentSync] Lead timeline comment warning: " . $e->getMessage());
-            }
-        } elseif ($appointment->b24_deal_id) {
+        if ($appointment->b24_deal_id) {
             try {
                 $this->bitrixService->addTimelineComment($tenant, $appointment->b24_deal_id, $comment, 'deal');
+                Log::info("[Invoice][Step 4/4 COMPLETE] Timeline comment posted to Deal #{$appointment->b24_deal_id}");
             } catch (\Exception $e) {
-                Log::warning("[AppointmentSync] Deal timeline comment warning: " . $e->getMessage());
+                Log::warning("[Invoice][Step 4/4 WARNING] Deal timeline comment failed: " . $e->getMessage());
+            }
+        } elseif ($appointment->b24_lead_id) {
+            try {
+                $this->bitrixService->addTimelineComment($tenant, $appointment->b24_lead_id, $comment, 'lead');
+                Log::info("[Invoice][Step 4/4 COMPLETE] Timeline comment posted to Lead #{$appointment->b24_lead_id}");
+            } catch (\Exception $e) {
+                Log::warning("[Invoice][Step 4/4 WARNING] Lead timeline comment failed: " . $e->getMessage());
             }
         }
 
@@ -324,6 +375,7 @@ class AppointmentSyncService
             'success' => true,
             'invoice_reference' => $invoiceRef,
             'total_amount' => $totalAmt,
+            'smart_invoice_id' => $smartInvoiceResult['result']['item']['id'] ?? null,
             'message' => $res['Message'] ?? 'Invoice created successfully',
         ];
     }

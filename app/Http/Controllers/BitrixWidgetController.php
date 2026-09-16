@@ -398,34 +398,65 @@ class BitrixWidgetController extends Controller
      */
     public function createInvoice(Request $request, Tenant $tenant, Appointment $appointment): JsonResponse
     {
-        $validated = $request->validate([
-            'invoiceDetails' => 'required|array|min:1',
-            'invoiceDetails.*.item_code' => 'required|integer',
-            'invoiceDetails.*.item_price' => 'required|numeric',
-            'invoiceDetails.*.line_qty' => 'required|integer',
-            'invoiceDetails.*.line_gross_amt' => 'required|numeric',
-            'invoiceDetails.*.line_disc_amt' => 'nullable|numeric',
-            'invoiceDetails.*.line_net_amt' => 'required|numeric',
-            'invoiceDetails.*.vat_per' => 'nullable|integer',
-            'invoiceDetails.*.vat_amt' => 'nullable|numeric',
-            'invoicePayments' => 'required|array|min:1',
-            'invoicePayments.*.payment_mode' => 'required|string',
-            'invoicePayments.*.paid_amt' => 'required|numeric',
-            'invoicePayments.*.paid_date' => 'required|string',
-            'invoicePayments.*.payment_reference_number' => 'nullable|string',
-            'invoicePayments.*.bank_name' => 'nullable|string',
-            'invoicePayments.*.transaction_card_type' => 'nullable|string',
+        Log::info("[Invoice][Controller] Invoice creation request received", [
+            'tenant' => $tenant->name,
+            'tenant_id' => $tenant->id,
+            'appointment_id' => $appointment->id,
+            'unite_appointment_id' => $appointment->unite_appointment_id,
+            'payload_keys' => array_keys($request->all()),
         ]);
 
-        $result = $this->syncService->generateInvoice(
-            $tenant,
-            $appointment,
-            $validated['invoiceDetails'],
-            $validated['invoicePayments']
-        );
+        try {
+            $validated = $request->validate([
+                'invoiceDetails' => 'required|array|min:1',
+                'invoiceDetails.*.item_code' => 'required|integer',
+                'invoiceDetails.*.item_price' => 'required|numeric',
+                'invoiceDetails.*.line_qty' => 'required|integer',
+                'invoiceDetails.*.line_gross_amt' => 'required|numeric',
+                'invoiceDetails.*.line_disc_amt' => 'nullable|numeric',
+                'invoiceDetails.*.line_net_amt' => 'required|numeric',
+                'invoiceDetails.*.vat_per' => 'nullable|integer',
+                'invoiceDetails.*.vat_amt' => 'nullable|numeric',
+                'invoicePayments' => 'required|array|min:1',
+                'invoicePayments.*.payment_mode' => 'required|string',
+                'invoicePayments.*.paid_amt' => 'required|numeric',
+                'invoicePayments.*.paid_date' => 'required|string',
+                'invoicePayments.*.payment_reference_number' => 'nullable|string',
+                'invoicePayments.*.bank_name' => 'nullable|string',
+                'invoicePayments.*.transaction_card_type' => 'nullable|string',
+            ]);
 
-        return response()->json(array_merge($result, [
-            'appointment' => $appointment->fresh(),
-        ]));
+            $result = $this->syncService->generateInvoice(
+                $tenant,
+                $appointment,
+                $validated['invoiceDetails'],
+                $validated['invoicePayments']
+            );
+
+            Log::info("[Invoice][Controller] Invoice creation completed", [
+                'result' => $result,
+            ]);
+
+            return response()->json(array_merge($result, [
+                'appointment' => $appointment->fresh(),
+            ]));
+        } catch (\Illuminate\Validation\ValidationException $ve) {
+            Log::warning("[Invoice][Controller] Validation error", [
+                'errors' => $ve->errors(),
+            ]);
+            return response()->json([
+                'success' => false,
+                'message' => 'Invoice validation error: ' . implode(', ', array_map(fn($e) => implode(' ', $e), $ve->errors())),
+            ], 422);
+        } catch (\Exception $e) {
+            Log::error("[Invoice][Controller] Invoice creation failed", [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+            return response()->json([
+                'success' => false,
+                'message' => 'Invoice creation failed: ' . $e->getMessage(),
+            ], 500);
+        }
     }
 }
