@@ -30,7 +30,7 @@ class BitrixService
         $endpoint = rtrim($tenant->b24_client_endpoint ?: "https://{$tenant->b24_domain}/rest/", '/') . '/';
         $accessToken = $this->ensureValidAccessToken($tenant);
 
-        $url = $endpoint . $method;
+        $url = $endpoint . $method . '?auth=' . urlencode($accessToken);
 
         try {
             $response = Http::timeout(12)->post($url, array_merge($params, [
@@ -46,7 +46,8 @@ class BitrixService
             // Check if token expired error
             if (isset($data['error']) && in_array($data['error'], ['expired_token', 'INVALID_CREDENTIALS'])) {
                 $newAccessToken = $this->refreshOAuthToken($tenant);
-                $retry = Http::timeout(12)->post($url, array_merge($params, [
+                $retryUrl = $endpoint . $method . '?auth=' . urlencode($newAccessToken);
+                $retry = Http::timeout(12)->post($retryUrl, array_merge($params, [
                     'auth' => $newAccessToken,
                 ]));
                 return $retry->json();

@@ -38,25 +38,64 @@ class BitrixWidgetController extends Controller
             'query' => $request->query(),
         ]);
 
+        // Capture incoming session tokens from Bitrix24 if passed in request
+        $authId = $request->input('AUTH_ID') ?: $request->query('AUTH_ID');
+        $domain = $request->input('DOMAIN') ?: $request->query('DOMAIN') ?: $request->input('domain') ?: $request->query('domain');
+        $refreshId = $request->input('REFRESH_ID') ?: $request->query('REFRESH_ID');
+
+        if ($authId || $domain) {
+            $updateFields = [];
+            if ($authId) $updateFields['b24_access_token'] = $authId;
+            if ($refreshId) $updateFields['b24_refresh_token'] = $refreshId;
+            if ($domain) {
+                $updateFields['b24_domain'] = $domain;
+                $updateFields['b24_client_endpoint'] = "https://{$domain}/rest/";
+            }
+            $tenant->update($updateFields);
+            $tenant->refresh();
+        }
+
         $dealId = $request->input('deal_id') ?: $request->query('deal_id');
         $leadId = $request->input('lead_id') ?: $request->query('lead_id');
         $contactId = $request->input('contact_id') ?: $request->query('contact_id');
-        $placement = $request->input('PLACEMENT', 'CRM_DEAL_DETAIL_TAB');
+        $placement = $request->input('PLACEMENT') ?: $request->query('PLACEMENT') ?: 'CRM_DEAL_DETAIL_TAB';
 
-        if ($request->filled('PLACEMENT_OPTIONS')) {
-            $rawOptions = $request->input('PLACEMENT_OPTIONS');
+        $rawOptions = $request->input('PLACEMENT_OPTIONS') ?: $request->query('PLACEMENT_OPTIONS');
+        if ($rawOptions) {
             $placementOptions = is_array($rawOptions) ? $rawOptions : json_decode($rawOptions, true);
+            if (!$placementOptions && is_string($rawOptions)) {
+                $placementOptions = json_decode(stripslashes($rawOptions), true) ?: json_decode(urldecode($rawOptions), true);
+            }
             $entityIdFromPlacement = $placementOptions['ID'] ?? $placementOptions['id'] ?? null;
             if ($entityIdFromPlacement) {
-                if ($placement === 'CRM_LEAD_DETAIL_TAB' && !$leadId) {
+                if (str_contains($placement, 'LEAD') && !$leadId) {
                     $leadId = $entityIdFromPlacement;
-                } elseif ($placement === 'CRM_CONTACT_DETAIL_TAB' && !$contactId) {
+                } elseif (str_contains($placement, 'CONTACT') && !$contactId) {
                     $contactId = $entityIdFromPlacement;
                 } elseif (!$dealId) {
                     $dealId = $entityIdFromPlacement;
                 }
             }
         }
+
+        // Fallback for ID parameter directly passed by Bitrix placement
+        if (!$leadId && !$dealId && !$contactId) {
+            $rawId = $request->input('ID') ?: $request->query('ID') ?: $request->input('id') ?: $request->query('id');
+            if ($rawId) {
+                if (str_contains($placement, 'LEAD')) $leadId = $rawId;
+                elseif (str_contains($placement, 'CONTACT')) $contactId = $rawId;
+                else $dealId = $rawId;
+            }
+        }
+
+        Log::info("[Bitrix Widget] Processing Tab View", [
+            'tenant' => $tenant->name,
+            'placement' => $placement,
+            'lead_id' => $leadId,
+            'deal_id' => $dealId,
+            'contact_id' => $contactId,
+            'has_b24_token' => !empty($tenant->b24_access_token),
+        ]);
 
         // Fetch directories from cache or Unite API
         $clinics = [];
@@ -73,9 +112,14 @@ class BitrixWidgetController extends Controller
 
         // Fetch existing appointment if already linked to this entity
         $existingAppointment = null;
-        if ($dealId) {
+        $targetEntityId = $dealId ?: ($leadId ?: $contactId);
+        if ($targetEntityId) {
             $existingAppointment = Appointment::where('tenant_id', $tenant->id)
-                ->where('b24_deal_id', (string) $dealId)
+                ->where(function ($q) use ($dealId, $leadId, $contactId) {
+                    if ($dealId) $q->orWhere('b24_deal_id', (string) $dealId);
+                    if ($leadId) $q->orWhere('b24_lead_id', (string) $leadId);
+                    if ($contactId) $q->orWhere('b24_contact_id', (string) $contactId);
+                })
                 ->latest()
                 ->first();
         }
@@ -90,7 +134,7 @@ class BitrixWidgetController extends Controller
             'requestedby' => '',
         ];
 
-        // Deal / Lead info & Patient Defaults fetch from Bitrix
+        // Fetch Current User & Entity details from Bitrix24 REST API
         $dealContext = null;
         if ($tenant->isBitrixAuthenticated()) {
             // Fetch current Bitrix24 user for 'requestedby' default
@@ -100,6 +144,7 @@ class BitrixWidgetController extends Controller
                     $userNameParts = array_filter([$currentUser['NAME'] ?? '', $currentUser['LAST_NAME'] ?? '']);
                     if (!empty($userNameParts)) {
                         $patientDefaults['requestedby'] = implode(' ', $userNameParts);
+                        Log::info("[Bitrix Widget] Logged-in Bitrix User fetched: {$patientDefaults['requestedby']}");
                     }
                 }
             } catch (\Exception $e) {
@@ -175,6 +220,8 @@ class BitrixWidgetController extends Controller
                     if ($email) $patientDefaults['emailid'] = $email;
                     if ($gender) $patientDefaults['gender'] = $gender;
                     if ($dob) $patientDefaults['dob'] = $dob;
+
+                    Log::info("[Bitrix Widget] Standard patient fields loaded from Bitrix:", $patientDefaults);
                 }
             } catch (\Exception $e) {
                 Log::info("[Bitrix Widget] Non-blocking Bitrix entity fetch error: " . $e->getMessage());

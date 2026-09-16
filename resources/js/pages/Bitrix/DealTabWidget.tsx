@@ -163,57 +163,94 @@ export default function DealTabWidget({
         !selectedClinicId || (d.clinics && d.clinics.includes(selectedClinicId))
     );
 
-    // Initial console debug group
+    // Console Debug Logging for Getting Data and Current User
     useEffect(() => {
-        console.group('🏥 [Unite EMR Widget] Widget Initialized');
-        console.log('Tenant Details:', tenant);
-        console.log('Deal ID:', dealId);
-        console.log('Deal Context:', dealContext);
-        console.log('Clinics Loaded:', clinics);
-        console.log('Doctors Loaded:', doctors);
-        console.log('Medical Services Loaded:', items);
-        console.log('Existing Appointment:', initialAppointment);
-        console.groupEnd();
-    }, []);
+        console.log('📌 [Bitrix Widget Data Loaded]', {
+            dealId,
+            leadId,
+            contactId,
+            patientDefaults,
+            activePatientData: patientData,
+        });
+        console.log('👤 [Bitrix Logged-in User]', {
+            requestedby: patientData.requestedby,
+        });
+    }, [patientDefaults, patientData.requestedby]);
 
-    // Console debug for Doctor filtering & selection
+    // Initialize Bitrix24 JS SDK & Client-Side Fallback Fetching
     useEffect(() => {
-        console.group('👨‍⚕️ [Unite EMR Widget] Doctor Directory Filter');
-        console.log('Active Clinic ID:', selectedClinicId);
-        console.log('Total Doctors Count:', doctors.length);
-        console.log('Filtered Doctors for Active Clinic:', availableDoctors);
-        console.log('Currently Selected Doctor ID:', selectedDoctorId);
-        console.groupEnd();
-    }, [selectedClinicId, doctors, availableDoctors, selectedDoctorId]);
+        const initBX24 = () => {
+            if (!window.BX24) return;
+            window.BX24.init(() => {
+                try {
+                    window.BX24?.fitWindow();
+                } catch (e) {}
 
-    // Initialize Bitrix24 JS SDK iframe resize
-    useEffect(() => {
+                // Fetch current user via BX24 JS SDK
+                window.BX24.callMethod('user.current', {}, (res: any) => {
+                    if (res && typeof res.data === 'function') {
+                        const userData = res.data();
+                        if (userData) {
+                            const userFullName = [userData.NAME, userData.LAST_NAME].filter(Boolean).join(' ');
+                            console.log('👤 [BX24 SDK] Current Logged-in User:', userFullName, userData);
+                            if (userFullName) {
+                                setPatientData(prev => ({
+                                    ...prev,
+                                    requestedby: prev.requestedby && prev.requestedby !== 'Bitrix24 CRM Agent' ? prev.requestedby : userFullName,
+                                }));
+                            }
+                        }
+                    }
+                });
+
+                // Fetch entity data via BX24 JS SDK if patient fields are empty
+                try {
+                    const placementInfo = window.BX24.placement.info();
+                    console.log('📌 [BX24 SDK] Placement Info:', placementInfo);
+                    const entityId = placementInfo?.options?.ID || placementInfo?.options?.id || dealId || leadId || contactId;
+
+                    if (entityId) {
+                        let method = 'crm.deal.get';
+                        if (String(placementInfo?.placement || '').includes('LEAD') || leadId) method = 'crm.lead.get';
+                        else if (String(placementInfo?.placement || '').includes('CONTACT') || contactId) method = 'crm.contact.get';
+
+                        window.BX24.callMethod(method, { id: entityId }, (res: any) => {
+                            if (res && typeof res.data === 'function') {
+                                const data = res.data();
+                                console.log(`📋 [BX24 SDK] Fetched ${method} Entity Data:`, data);
+                                if (data) {
+                                    const extractPhone = (arr: any) => Array.isArray(arr) && arr.length ? arr[0].VALUE : (typeof arr === 'string' ? arr : '');
+                                    const extractEmail = (arr: any) => Array.isArray(arr) && arr.length ? arr[0].VALUE : (typeof arr === 'string' ? arr : '');
+
+                                    setPatientData(prev => ({
+                                        ...prev,
+                                        firstname: prev.firstname || data.NAME || '',
+                                        lastname: prev.lastname || data.LAST_NAME || '',
+                                        mobileno: prev.mobileno || extractPhone(data.PHONE) || '',
+                                        emailid: prev.emailid || extractEmail(data.EMAIL) || '',
+                                        gender: (data.GENDER_ID && ['M','F','U'].includes(data.GENDER_ID)) ? data.GENDER_ID : prev.gender,
+                                        dob: data.BIRTHDATE ? String(data.BIRTHDATE) : prev.dob,
+                                    }));
+                                }
+                            }
+                        });
+                    }
+                } catch (e) {
+                    console.log('[BX24 SDK] Placement info check exception:', e);
+                }
+            });
+        };
+
         const scriptId = 'bitrix-js-sdk';
         if (!document.getElementById(scriptId)) {
             const script = document.createElement('script');
             script.id = scriptId;
             script.src = '//api.bitrix24.com/api/v1/';
             script.async = true;
-            script.onload = () => {
-                if (window.BX24) {
-                    window.BX24.init(() => {
-                        try {
-                            window.BX24?.fitWindow();
-                        } catch (e) {
-                            console.log('BX24 fitWindow call inside widget:', e);
-                        }
-                    });
-                }
-            };
+            script.onload = initBX24;
             document.head.appendChild(script);
-        } else if (window.BX24) {
-            window.BX24.init(() => {
-                try {
-                    window.BX24?.fitWindow();
-                } catch (e) {
-                    console.log('BX24 fitWindow call inside widget:', e);
-                }
-            });
+        } else {
+            initBX24();
         }
     }, []);
 
