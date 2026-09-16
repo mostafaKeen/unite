@@ -522,7 +522,18 @@ class UniteClient
      */
     public function getItemDetails(Tenant $tenant, bool $forceRefresh = false): array
     {
-        if (!$forceRefresh && !empty($tenant->items_cache)) {
+        $hasSampleItems = false;
+        if (!empty($tenant->items_cache)) {
+            foreach ($tenant->items_cache as $item) {
+                $code = (int) ($item['item_code'] ?? 0);
+                if (in_array($code, [101, 102, 20842, 305, 501])) {
+                    $hasSampleItems = true;
+                    break;
+                }
+            }
+        }
+
+        if (!$forceRefresh && !$hasSampleItems && !empty($tenant->items_cache)) {
             Log::info("[Unite Directory] getItemDetails returning from cache", [
                 'tenant' => $tenant->name,
                 'cached_count' => count($tenant->items_cache),
@@ -559,9 +570,20 @@ class UniteClient
                 'body_preview' => Str::limit($body, 300),
             ]);
 
-            if ($response->successful() && is_array($itemsList)) {
-                $tenant->update(['items_cache' => $itemsList]);
-                return $itemsList;
+            if ($response->successful() && is_array($itemsList) && count($itemsList) > 0) {
+                $normalizedItems = array_map(function ($item) {
+                    return [
+                        'item_code' => (int) ($item['item_code'] ?? $item['itemcode'] ?? $item['ItemCode'] ?? $item['itm_code'] ?? 0),
+                        'item_description' => (string) ($item['item_description'] ?? $item['description'] ?? $item['ItemDescription'] ?? ''),
+                        'price' => (float) ($item['price'] ?? $item['Price'] ?? $item['item_price'] ?? 0),
+                        'clinic_id' => (string) ($item['clinic_id'] ?? $item['clinicid'] ?? $item['ClinicId'] ?? ''),
+                        'average_time_in_minutes' => (int) ($item['average_time_in_minutes'] ?? $item['duration'] ?? 20),
+                        'PackageItemDetails' => is_array($item['PackageItemDetails'] ?? null) ? $item['PackageItemDetails'] : [],
+                    ];
+                }, $itemsList);
+
+                $tenant->update(['items_cache' => $normalizedItems]);
+                return $normalizedItems;
             }
         } catch (\Exception $e) {
             Log::warning("[Unite Directory] getItemDetails live fetch skipped/failed for {$tenant->name}: {$e->getMessage()}");
@@ -644,7 +666,12 @@ class UniteClient
         $token = $this->ensureValidToken($tenant);
         $baseUrl = $this->getBaseUrl($tenant);
         
-        $hasItems = !empty($params['itemcode']);
+        $rawItems = !empty($params['itemcode']) ? (is_array($params['itemcode']) ? $params['itemcode'] : [$params['itemcode']]) : [];
+        $validItems = array_values(array_map('intval', array_filter($rawItems, function ($v) {
+            return is_numeric($v) && (int)$v > 0;
+        })));
+
+        $hasItems = !empty($validItems);
         $endpoint = $hasItems ? '/CreateAppointmentWithItemDetails' : '/CreateAppointment';
         $url = "{$baseUrl}{$endpoint}";
 
@@ -668,11 +695,7 @@ class UniteClient
         ];
 
         if ($hasItems) {
-            $rawItems = is_array($params['itemcode']) ? $params['itemcode'] : [$params['itemcode']];
-            $payload['itemcode'] = array_values(array_map('intval', array_filter($rawItems, 'is_numeric')));
-            if (empty($payload['itemcode'])) {
-                $payload['itemcode'] = [101];
-            }
+            $payload['itemcode'] = $validItems;
         }
 
         Log::info("[Unite Booking] Sending request to Unite EMR Gateway", [
