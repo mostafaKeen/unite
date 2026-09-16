@@ -292,7 +292,17 @@ class UniteClient
      */
     public function getClinics(Tenant $tenant, bool $forceRefresh = false): array
     {
-        if (!$forceRefresh && !empty($tenant->clinics_cache)) {
+        $hasSampleData = false;
+        if (!empty($tenant->clinics_cache)) {
+            foreach ($tenant->clinics_cache as $clinic) {
+                if (isset($clinic['clinic_id']) && str_starts_with((string)$clinic['clinic_id'], 'DHA-H-')) {
+                    $hasSampleData = true;
+                    break;
+                }
+            }
+        }
+
+        if (!$forceRefresh && !$hasSampleData && !empty($tenant->clinics_cache)) {
             Log::info("[Unite Directory] getClinics returning from cache", [
                 'tenant' => $tenant->name,
                 'cached_count' => count($tenant->clinics_cache),
@@ -329,7 +339,7 @@ class UniteClient
                 'body_preview' => Str::limit($body, 300),
             ]);
 
-            if ($response->successful() && is_array($clinicsList)) {
+            if ($response->successful() && is_array($clinicsList) && count($clinicsList) > 0) {
                 $normalizedClinics = array_map(function ($clinic) {
                     return [
                         'clinic_id' => (string) ($clinic['clinic_id'] ?? $clinic['clinicid'] ?? $clinic['ClinicId'] ?? $clinic['id'] ?? ''),
@@ -359,7 +369,17 @@ class UniteClient
      */
     public function getDoctors(Tenant $tenant, bool $forceRefresh = false): array
     {
-        if (!$forceRefresh && !empty($tenant->doctors_cache)) {
+        $hasSampleData = false;
+        if (!empty($tenant->doctors_cache)) {
+            foreach ($tenant->doctors_cache as $doc) {
+                if (isset($doc['doctor_id']) && str_starts_with((string)$doc['doctor_id'], 'DHA-')) {
+                    $hasSampleData = true;
+                    break;
+                }
+            }
+        }
+
+        if (!$forceRefresh && !$hasSampleData && !empty($tenant->doctors_cache)) {
             Log::info("[Unite Directory] getDoctors returning from cache", [
                 'tenant' => $tenant->name,
                 'cached_count' => count($tenant->doctors_cache),
@@ -396,7 +416,7 @@ class UniteClient
                 'body_preview' => Str::limit($body, 300),
             ]);
 
-            if ($response->successful() && is_array($doctorsList)) {
+            if ($response->successful() && is_array($doctorsList) && count($doctorsList) > 0) {
                 $normalizedDoctors = array_map(function ($doc) {
                     return [
                         'doctor_id' => (string) ($doc['doctor_id'] ?? $doc['doctorid'] ?? $doc['DoctorId'] ?? $doc['id'] ?? ''),
