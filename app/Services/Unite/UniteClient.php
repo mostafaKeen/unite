@@ -320,17 +320,27 @@ class UniteClient
             $status = $response->status();
             $body = $response->body();
             $data = $response->json();
+            $clinicsList = $data['Data'] ?? $data['data'] ?? null;
 
             Log::info("[Unite Directory] getClinics live response", [
                 'tenant' => $tenant->name,
                 'http_status' => $status,
-                'clinics_count' => isset($data['Data']) && is_array($data['Data']) ? count($data['Data']) : 0,
+                'clinics_count' => is_array($clinicsList) ? count($clinicsList) : 0,
                 'body_preview' => Str::limit($body, 300),
             ]);
 
-            if ($response->successful() && isset($data['Data']) && is_array($data['Data'])) {
-                $tenant->update(['clinics_cache' => $data['Data']]);
-                return $data['Data'];
+            if ($response->successful() && is_array($clinicsList)) {
+                $normalizedClinics = array_map(function ($clinic) {
+                    return [
+                        'clinic_id' => (string) ($clinic['clinic_id'] ?? $clinic['clinicid'] ?? $clinic['ClinicId'] ?? $clinic['id'] ?? ''),
+                        'name' => (string) ($clinic['name'] ?? $clinic['clinic_name'] ?? $clinic['ClinicName'] ?? $clinic['clinicname'] ?? ''),
+                        'city' => (string) ($clinic['city'] ?? $clinic['City'] ?? ''),
+                        'phone' => (string) ($clinic['phone'] ?? $clinic['Phone'] ?? ''),
+                    ];
+                }, $clinicsList);
+
+                $tenant->update(['clinics_cache' => $normalizedClinics]);
+                return $normalizedClinics;
             }
         } catch (\Exception $e) {
             Log::warning("[Unite Directory] getClinics live fetch skipped/failed for {$tenant->name}: {$e->getMessage()}");
@@ -377,17 +387,27 @@ class UniteClient
             $status = $response->status();
             $body = $response->body();
             $data = $response->json();
+            $doctorsList = $data['Data'] ?? $data['data'] ?? null;
 
             Log::info("[Unite Directory] getDoctors live response", [
                 'tenant' => $tenant->name,
                 'http_status' => $status,
-                'doctors_count' => isset($data['Data']) && is_array($data['Data']) ? count($data['Data']) : 0,
+                'doctors_count' => is_array($doctorsList) ? count($doctorsList) : 0,
                 'body_preview' => Str::limit($body, 300),
             ]);
 
-            if ($response->successful() && isset($data['Data']) && is_array($data['Data'])) {
-                $tenant->update(['doctors_cache' => $data['Data']]);
-                return $data['Data'];
+            if ($response->successful() && is_array($doctorsList)) {
+                $normalizedDoctors = array_map(function ($doc) {
+                    return [
+                        'doctor_id' => (string) ($doc['doctor_id'] ?? $doc['doctorid'] ?? $doc['DoctorId'] ?? $doc['id'] ?? ''),
+                        'name' => (string) ($doc['name'] ?? $doc['doctor_name'] ?? $doc['DoctorName'] ?? $doc['doctorname'] ?? ''),
+                        'clinics' => is_array($doc['clinics'] ?? null) ? $doc['clinics'] : (array) ($doc['clinics'] ?? []),
+                        'specialty' => (string) ($doc['specialty'] ?? $doc['Specialty'] ?? ''),
+                    ];
+                }, $doctorsList);
+
+                $tenant->update(['doctors_cache' => $normalizedDoctors]);
+                return $normalizedDoctors;
             }
         } catch (\Exception $e) {
             Log::warning("[Unite Directory] getDoctors live fetch skipped/failed for {$tenant->name}: {$e->getMessage()}");
@@ -510,17 +530,18 @@ class UniteClient
             $status = $response->status();
             $body = $response->body();
             $data = $response->json();
+            $itemsList = $data['Data'] ?? $data['data'] ?? null;
 
             Log::info("[Unite Directory] getItemDetails live response", [
                 'tenant' => $tenant->name,
                 'http_status' => $status,
-                'items_count' => isset($data['Data']) && is_array($data['Data']) ? count($data['Data']) : 0,
+                'items_count' => is_array($itemsList) ? count($itemsList) : 0,
                 'body_preview' => Str::limit($body, 300),
             ]);
 
-            if ($response->successful() && isset($data['Data']) && is_array($data['Data'])) {
-                $tenant->update(['items_cache' => $data['Data']]);
-                return $data['Data'];
+            if ($response->successful() && is_array($itemsList)) {
+                $tenant->update(['items_cache' => $itemsList]);
+                return $itemsList;
             }
         } catch (\Exception $e) {
             Log::warning("[Unite Directory] getItemDetails live fetch skipped/failed for {$tenant->name}: {$e->getMessage()}");
