@@ -51,6 +51,16 @@ interface Appointment {
     invoice_total?: number;
 }
 
+interface PatientDefaults {
+    firstname?: string;
+    lastname?: string;
+    mobileno?: string;
+    emailid?: string;
+    gender?: string;
+    dob?: string;
+    requestedby?: string;
+}
+
 interface Props {
     tenant: {
         id: string;
@@ -59,6 +69,8 @@ interface Props {
         b24_domain?: string;
     };
     dealId?: string | number;
+    leadId?: string | number;
+    contactId?: string | number;
     dealContext?: {
         id: string | number;
         title: string;
@@ -69,17 +81,21 @@ interface Props {
     items: ItemDetail[];
     existingAppointment?: Appointment | null;
     statusMap: Record<string, { label: string; color: string; stage?: string }>;
+    patientDefaults?: PatientDefaults;
 }
 
 export default function DealTabWidget({
     tenant,
     dealId,
+    leadId,
+    contactId,
     dealContext,
     clinics = [],
     doctors = [],
     items = [],
     existingAppointment: initialAppointment,
     statusMap = {},
+    patientDefaults,
 }: Props) {
     const [appointment, setAppointment] = useState<Appointment | null>(initialAppointment || null);
     const [showBookingForm, setShowBookingForm] = useState(!initialAppointment);
@@ -103,20 +119,35 @@ export default function DealTabWidget({
     const [successMessage, setSuccessMessage] = useState<string>('');
     const [errorMessage, setErrorMessage] = useState<string>('');
 
-    // Patient info
+    // Patient info pre-filled from Bitrix24 default fields
     const [patientData, setPatientData] = useState({
-        firstname: '',
+        firstname: patientDefaults?.firstname || '',
         middlename: '',
-        lastname: '',
-        gender: 'M',
-        mobileno: '',
-        emailid: '',
-        dob: '',
+        lastname: patientDefaults?.lastname || '',
+        gender: patientDefaults?.gender || 'M',
+        mobileno: patientDefaults?.mobileno || '',
+        emailid: patientDefaults?.emailid || '',
+        dob: patientDefaults?.dob || '',
         phototype: 'EMIRATES_ID',
         photoid: '',
         remarks: '',
-        requestedby: 'Bitrix24 CRM Agent',
+        requestedby: patientDefaults?.requestedby || 'Bitrix24 CRM Agent',
     });
+
+    useEffect(() => {
+        if (patientDefaults) {
+            setPatientData(prev => ({
+                ...prev,
+                firstname: patientDefaults.firstname || prev.firstname,
+                lastname: patientDefaults.lastname || prev.lastname,
+                mobileno: patientDefaults.mobileno || prev.mobileno,
+                emailid: patientDefaults.emailid || prev.emailid,
+                gender: patientDefaults.gender || prev.gender,
+                dob: patientDefaults.dob || prev.dob,
+                requestedby: patientDefaults.requestedby || prev.requestedby,
+            }));
+        }
+    }, [patientDefaults]);
 
     // Procedures / Items selected
     const [selectedItemCodes, setSelectedItemCodes] = useState<number[]>([]);
@@ -270,7 +301,8 @@ export default function DealTabWidget({
 
         const payload = {
             b24_deal_id: dealId ? String(dealId) : null,
-            b24_contact_id: dealContext?.contact_id ? String(dealContext.contact_id) : null,
+            b24_lead_id: leadId ? String(leadId) : null,
+            b24_contact_id: contactId ? String(contactId) : (dealContext?.contact_id ? String(dealContext.contact_id) : null),
             clinicid: selectedClinicId,
             clinicname: selectedClinic?.name || selectedClinicId,
             doctorid: selectedDoctorId,

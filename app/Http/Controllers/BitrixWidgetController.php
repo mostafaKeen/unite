@@ -39,12 +39,23 @@ class BitrixWidgetController extends Controller
         ]);
 
         $dealId = $request->input('deal_id') ?: $request->query('deal_id');
+        $leadId = $request->input('lead_id') ?: $request->query('lead_id');
+        $contactId = $request->input('contact_id') ?: $request->query('contact_id');
         $placement = $request->input('PLACEMENT', 'CRM_DEAL_DETAIL_TAB');
 
-        if (!$dealId && $request->filled('PLACEMENT_OPTIONS')) {
+        if ($request->filled('PLACEMENT_OPTIONS')) {
             $rawOptions = $request->input('PLACEMENT_OPTIONS');
             $placementOptions = is_array($rawOptions) ? $rawOptions : json_decode($rawOptions, true);
-            $dealId = $placementOptions['ID'] ?? $placementOptions['id'] ?? null;
+            $entityIdFromPlacement = $placementOptions['ID'] ?? $placementOptions['id'] ?? null;
+            if ($entityIdFromPlacement) {
+                if ($placement === 'CRM_LEAD_DETAIL_TAB' && !$leadId) {
+                    $leadId = $entityIdFromPlacement;
+                } elseif ($placement === 'CRM_CONTACT_DETAIL_TAB' && !$contactId) {
+                    $contactId = $entityIdFromPlacement;
+                } elseif (!$dealId) {
+                    $dealId = $entityIdFromPlacement;
+                }
+            }
         }
 
         // Fetch directories from cache or Unite API
@@ -69,26 +80,112 @@ class BitrixWidgetController extends Controller
                 ->first();
         }
 
-        // Deal / Lead info simulation or fetch from Bitrix
+        $patientDefaults = [
+            'firstname' => '',
+            'lastname' => '',
+            'mobileno' => '',
+            'emailid' => '',
+            'gender' => 'M',
+            'dob' => '',
+            'requestedby' => '',
+        ];
+
+        // Deal / Lead info & Patient Defaults fetch from Bitrix
         $dealContext = null;
-        if ($dealId && $tenant->isBitrixAuthenticated()) {
+        if ($tenant->isBitrixAuthenticated()) {
+            // Fetch current Bitrix24 user for 'requestedby' default
             try {
-                $dealData = $this->bitrixService->getDeal($tenant, $dealId);
-                if (!empty($dealData)) {
-                    $dealContext = [
-                        'id' => $dealId,
-                        'title' => $dealData['TITLE'] ?? "CRM Entity #{$dealId}",
-                        'contact_id' => $dealData['CONTACT_ID'] ?? null,
-                    ];
+                $currentUser = $this->bitrixService->getCurrentUser($tenant);
+                if (!empty($currentUser)) {
+                    $userNameParts = array_filter([$currentUser['NAME'] ?? '', $currentUser['LAST_NAME'] ?? '']);
+                    if (!empty($userNameParts)) {
+                        $patientDefaults['requestedby'] = implode(' ', $userNameParts);
+                    }
                 }
             } catch (\Exception $e) {
-                Log::info("[Bitrix Widget] Non-blocking Bitrix deal fetch error: " . $e->getMessage());
+                Log::info("[Bitrix Widget] Non-blocking Bitrix user fetch error: " . $e->getMessage());
+            }
+
+            try {
+                $entityData = null;
+                $contactData = null;
+
+                if ($leadId) {
+                    $entityData = $this->bitrixService->getLead($tenant, $leadId);
+                    if (!empty($entityData['CONTACT_ID'])) {
+                        $contactData = $this->bitrixService->getContact($tenant, $entityData['CONTACT_ID']);
+                    }
+                } elseif ($dealId) {
+                    $dealData = $this->bitrixService->getDeal($tenant, $dealId);
+                    if (!empty($dealData)) {
+                        $dealContext = [
+                            'id' => $dealId,
+                            'title' => $dealData['TITLE'] ?? "CRM Entity #{$dealId}",
+                            'contact_id' => $dealData['CONTACT_ID'] ?? null,
+                        ];
+                    }
+                    if (!empty($dealData['CONTACT_ID'])) {
+                        $contactData = $this->bitrixService->getContact($tenant, $dealData['CONTACT_ID']);
+                    }
+                } elseif ($contactId) {
+                    $contactData = $this->bitrixService->getContact($tenant, $contactId);
+                }
+
+                // Helper to extract phone & email from Bitrix arrays
+                $extractFirstPhone = function ($phoneArr) {
+                    if (is_array($phoneArr) && count($phoneArr) > 0) {
+                        return $phoneArr[0]['VALUE'] ?? '';
+                    }
+                    return is_string($phoneArr) ? $phoneArr : '';
+                };
+
+                $extractFirstEmail = function ($emailArr) {
+                    if (is_array($emailArr) && count($emailArr) > 0) {
+                        return $emailArr[0]['VALUE'] ?? '';
+                    }
+                    return is_string($emailArr) ? $emailArr : '';
+                };
+
+                // Format birthdate to dd-MM-yyyy format expected by widget
+                $formatDob = function ($rawDate) {
+                    if (empty($rawDate)) return '';
+                    try {
+                        $ts = strtotime($rawDate);
+                        if ($ts !== false) {
+                            return date('d-m-Y', $ts);
+                        }
+                    } catch (\Exception $e) {}
+                    return (string) $rawDate;
+                };
+
+                $primary = !empty($entityData) ? $entityData : $contactData;
+
+                if ($primary) {
+                    $fname = $primary['NAME'] ?? ($contactData['NAME'] ?? '');
+                    $lname = $primary['LAST_NAME'] ?? ($contactData['LAST_NAME'] ?? '');
+                    $phone = $extractFirstPhone($primary['PHONE'] ?? ($contactData['PHONE'] ?? null));
+                    $email = $extractFirstEmail($primary['EMAIL'] ?? ($contactData['EMAIL'] ?? null));
+                    $genderRaw = strtoupper($primary['GENDER_ID'] ?? ($contactData['GENDER_ID'] ?? 'M'));
+                    $gender = in_array($genderRaw, ['M', 'F', 'U']) ? $genderRaw : 'M';
+                    $dob = $formatDob($primary['BIRTHDATE'] ?? ($contactData['BIRTHDATE'] ?? null));
+
+                    if ($fname) $patientDefaults['firstname'] = $fname;
+                    if ($lname) $patientDefaults['lastname'] = $lname;
+                    if ($phone) $patientDefaults['mobileno'] = $phone;
+                    if ($email) $patientDefaults['emailid'] = $email;
+                    if ($gender) $patientDefaults['gender'] = $gender;
+                    if ($dob) $patientDefaults['dob'] = $dob;
+                }
+            } catch (\Exception $e) {
+                Log::info("[Bitrix Widget] Non-blocking Bitrix entity fetch error: " . $e->getMessage());
             }
         }
 
         return Inertia::render('Bitrix/DealTabWidget', [
             'tenant' => $tenant,
             'dealId' => $dealId,
+            'leadId' => $leadId,
+            'contactId' => $contactId,
             'dealContext' => $dealContext,
             'clinics' => $clinics,
             'doctors' => $doctors,
@@ -97,6 +194,7 @@ class BitrixWidgetController extends Controller
             'statusMap' => BitrixService::STATUS_MAP,
             'placement' => $placement,
             'hasUniteCredentials' => $hasUniteCredentials,
+            'patientDefaults' => $patientDefaults,
         ]);
     }
 

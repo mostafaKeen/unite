@@ -139,6 +139,33 @@ class BitrixService
     }
 
     /**
+     * Retrieve Lead details
+     */
+    public function getLead(Tenant $tenant, string|int $leadId): array
+    {
+        $result = $this->call($tenant, 'crm.lead.get', ['id' => $leadId]);
+        if (isset($result['result']) && is_array($result['result'])) {
+            return $result['result'];
+        }
+        return [
+            'ID' => (string) $leadId,
+            'TITLE' => "Medical Consultation Lead #{$leadId}",
+        ];
+    }
+
+    /**
+     * Retrieve current logged-in Bitrix24 User details
+     */
+    public function getCurrentUser(Tenant $tenant): array
+    {
+        $result = $this->call($tenant, 'user.current', []);
+        if (isset($result['result']) && is_array($result['result'])) {
+            return $result['result'];
+        }
+        return [];
+    }
+
+    /**
      * Get Contact details
      */
     public function getContact(Tenant $tenant, string|int $contactId): array
