@@ -211,7 +211,6 @@ class BitrixService
         $fields = [
             'title' => $invoiceParams['title'] ?? 'Unite EMR Medical Tax Invoice',
             'opportunity' => $invoiceParams['opportunity'] ?? 0,
-            'currencyId' => 'AED',
             'isManualOpportunity' => 'Y',
         ];
 
