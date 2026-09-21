@@ -230,6 +230,30 @@ class BitrixWidgetController extends Controller
             }
         }
 
+        // Auto-match appointment by phone number if not directly linked yet
+        if (!$existingAppointment && !empty($patientDefaults['mobileno'])) {
+            $digits = preg_replace('/[^\d]/', '', $patientDefaults['mobileno']);
+            $lastDigits = strlen($digits) >= 8 ? substr($digits, -8) : $digits;
+            if ($lastDigits) {
+                $existingAppointment = Appointment::where('tenant_id', $tenant->id)
+                    ->where('patient_mobileno', 'like', "%{$lastDigits}%")
+                    ->latest()
+                    ->first();
+            }
+
+            // If still null, query live appointments from Unite EMR API by phone number
+            if (!$existingAppointment) {
+                try {
+                    $liveApps = $this->uniteClient->getAppointments($tenant, phoneNo: $patientDefaults['mobileno']);
+                    if (!empty($liveApps)) {
+                        $existingAppointment = $liveApps[0];
+                    }
+                } catch (\Exception $e) {
+                    Log::info("[Bitrix Widget] Phone match Unite live appointment lookup warning: " . $e->getMessage());
+                }
+            }
+        }
+
         return Inertia::render('Bitrix/DealTabWidget', [
             'tenant' => $tenant,
             'dealId' => $dealId,

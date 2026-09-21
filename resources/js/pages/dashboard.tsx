@@ -116,6 +116,11 @@ export default function Dashboard({
     const [showNewTenantModal, setShowNewTenantModal] = useState<boolean>(false);
     const [showNewUserModal, setShowNewUserModal] = useState<boolean>(false);
 
+    // Appointments Calendar State
+    const [appointmentsViewMode, setAppointmentsViewMode] = useState<'calendar' | 'table'>('calendar');
+    const [currentCalendarMonth, setCurrentCalendarMonth] = useState<Date>(new Date());
+    const [selectedAppointmentModal, setSelectedAppointmentModal] = useState<Appointment | null>(null);
+
     // Items state (Direct live items from Unite EMR API - Read-only catalog)
     const [liveItems, setLiveItems] = useState<any[]>([]);
     const [itemSearchTerm, setItemSearchTerm] = useState<string>('');
@@ -416,6 +421,59 @@ export default function Dashboard({
         a.patient_mobileno.includes(searchTerm) ||
         (a.doctor_name && a.doctor_name.toLowerCase().includes(searchTerm.toLowerCase()))
     );
+
+    const getCalendarDays = () => {
+        const year = currentCalendarMonth.getFullYear();
+        const month = currentCalendarMonth.getMonth();
+        const firstDayOfMonth = new Date(year, month, 1);
+        const lastDayOfMonth = new Date(year, month + 1, 0);
+
+        const startingDayOfWeek = firstDayOfMonth.getDay();
+        const totalDays = lastDayOfMonth.getDate();
+
+        const days: { date: Date; isCurrentMonth: boolean }[] = [];
+        const prevMonthLastDay = new Date(year, month, 0).getDate();
+        for (let i = startingDayOfWeek - 1; i >= 0; i--) {
+            days.push({
+                date: new Date(year, month - 1, prevMonthLastDay - i),
+                isCurrentMonth: false,
+            });
+        }
+        for (let day = 1; day <= totalDays; day++) {
+            days.push({
+                date: new Date(year, month, day),
+                isCurrentMonth: true,
+            });
+        }
+        const remainingSlots = (7 - (days.length % 7)) % 7;
+        for (let i = 1; i <= remainingSlots; i++) {
+            days.push({
+                date: new Date(year, month + 1, i),
+                isCurrentMonth: false,
+            });
+        }
+        return days;
+    };
+
+    const getAppointmentsForDate = (dateObj: Date) => {
+        const y = dateObj.getFullYear();
+        const m = String(dateObj.getMonth() + 1).padStart(2, '0');
+        const d = String(dateObj.getDate()).padStart(2, '0');
+        const targetDateStr = `${y}-${m}-${d}`;
+
+        return filteredAppointments.filter(a => {
+            if (!a.start_datetime) return false;
+            try {
+                const apptDate = new Date(a.start_datetime);
+                const apptY = apptDate.getFullYear();
+                const apptM = String(apptDate.getMonth() + 1).padStart(2, '0');
+                const apptD = String(apptDate.getDate()).padStart(2, '0');
+                return `${apptY}-${apptM}-${apptD}` === targetDateStr;
+            } catch (e) {
+                return false;
+            }
+        });
+    };
 
     return (
         <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 font-sans">
@@ -861,96 +919,220 @@ export default function Dashboard({
                 {/* Tab 2: Appointments Ledger */}
                 {activeTab === 'appointments' && (
                     <div className="bg-white dark:bg-slate-900 border border-teal-100 dark:border-teal-900/40 rounded-2xl overflow-hidden shadow-sm">
-                        <div className="p-4 border-b border-slate-100 dark:border-slate-800 flex flex-col sm:flex-row items-center justify-between gap-3">
-                            <div className="relative w-full sm:w-80">
-                                <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
-                                <input
-                                    type="text"
-                                    value={searchTerm}
-                                    onChange={(e) => setSearchTerm(e.target.value)}
-                                    placeholder="Search patient name, phone, or doctor..."
-                                    className="w-full pl-9 pr-4 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs focus:ring-2 focus:ring-[#00a5b5] focus:outline-none"
-                                />
+                        <div className="p-4 border-b border-slate-100 dark:border-slate-800 flex flex-col md:flex-row items-center justify-between gap-3">
+                            <div className="flex items-center gap-2 w-full md:w-auto">
+                                <div className="relative w-full md:w-80">
+                                    <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+                                    <input
+                                        type="text"
+                                        value={searchTerm}
+                                        onChange={(e) => setSearchTerm(e.target.value)}
+                                        placeholder="Search patient name, phone, or doctor..."
+                                        className="w-full pl-9 pr-4 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs focus:ring-2 focus:ring-[#00a5b5] focus:outline-none"
+                                    />
+                                </div>
                             </div>
-                            <span className="text-xs text-slate-400">
-                                Showing {filteredAppointments.length} synced records
-                            </span>
+
+                            {/* View Switcher & Month Navigation */}
+                            <div className="flex items-center gap-3 w-full md:w-auto justify-between md:justify-end">
+                                {appointmentsViewMode === 'calendar' && (
+                                    <div className="flex items-center gap-2 text-xs font-bold text-slate-700 dark:text-slate-200">
+                                        <button
+                                            onClick={() => {
+                                                const d = new Date(currentCalendarMonth);
+                                                d.setMonth(d.getMonth() - 1);
+                                                setCurrentCalendarMonth(d);
+                                            }}
+                                            className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800"
+                                        >
+                                            &lt;
+                                        </button>
+                                        <span className="min-w-[120px] text-center font-semibold">
+                                            {currentCalendarMonth.toLocaleDateString('default', { month: 'long', year: 'numeric' })}
+                                        </span>
+                                        <button
+                                            onClick={() => {
+                                                const d = new Date(currentCalendarMonth);
+                                                d.setMonth(d.getMonth() + 1);
+                                                setCurrentCalendarMonth(d);
+                                            }}
+                                            className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800"
+                                        >
+                                            &gt;
+                                        </button>
+                                        <button
+                                            onClick={() => setCurrentCalendarMonth(new Date())}
+                                            className="px-2.5 py-1 text-[11px] font-semibold text-[#00a5b5] bg-teal-50 dark:bg-teal-950/40 rounded-lg"
+                                        >
+                                            Today
+                                        </button>
+                                    </div>
+                                )}
+
+                                <div className="flex items-center bg-slate-100 dark:bg-slate-800 p-1 rounded-xl">
+                                    <button
+                                        onClick={() => setAppointmentsViewMode('calendar')}
+                                        className={`px-3 py-1 rounded-lg text-xs font-semibold transition-all ${
+                                            appointmentsViewMode === 'calendar'
+                                                ? 'bg-white dark:bg-slate-900 text-[#00a5b5] shadow-sm'
+                                                : 'text-slate-500 hover:text-slate-700'
+                                        }`}
+                                    >
+                                        📅 Calendar View
+                                    </button>
+                                    <button
+                                        onClick={() => setAppointmentsViewMode('table')}
+                                        className={`px-3 py-1 rounded-lg text-xs font-semibold transition-all ${
+                                            appointmentsViewMode === 'table'
+                                                ? 'bg-white dark:bg-slate-900 text-[#00a5b5] shadow-sm'
+                                                : 'text-slate-500 hover:text-slate-700'
+                                        }`}
+                                    >
+                                        📋 Table View
+                                    </button>
+                                </div>
+                            </div>
                         </div>
 
-                        <div className="overflow-x-auto">
-                            <table className="w-full text-left text-xs">
-                                <thead className="bg-slate-50 dark:bg-slate-800/60 text-slate-400 font-semibold border-b border-slate-100 dark:border-slate-800">
-                                    <tr>
-                                        <th className="p-3.5">Unite Appt ID</th>
-                                        <th className="p-3.5">Patient Details</th>
-                                        <th className="p-3.5">Clinic & Doctor</th>
-                                        <th className="p-3.5">Date & Time</th>
-                                        <th className="p-3.5">Status</th>
-                                        <th className="p-3.5">Bitrix Deal</th>
-                                        <th className="p-3.5">Tax Invoice</th>
-                                    </tr>
-                                </thead>
-                                <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                                    {filteredAppointments.length === 0 ? (
-                                        <tr>
-                                            <td colSpan={7} className="p-8 text-center text-slate-400">
-                                                No appointments found matching your criteria.
-                                            </td>
-                                        </tr>
-                                    ) : (
-                                        filteredAppointments.map((a) => (
-                                            <tr key={a.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/30">
-                                                <td className="p-3.5 font-mono font-bold text-[#00a5b5]">
-                                                    #{a.unite_appointment_id}
-                                                </td>
-                                                <td className="p-3.5">
-                                                    <span className="font-bold text-slate-800 dark:text-slate-200 block">
-                                                        {a.patient_firstname} {a.patient_lastname}
-                                                    </span>
-                                                    <span className="text-slate-400 text-[11px] font-mono">
-                                                        {a.patient_mobileno}
-                                                    </span>
-                                                </td>
-                                                <td className="p-3.5">
-                                                    <span className="font-semibold block text-slate-700 dark:text-slate-300">
-                                                        {a.clinic_name || a.clinic_id}
-                                                    </span>
-                                                    <span className="text-slate-400 text-[11px]">
-                                                        {a.doctor_name || 'Assigned Physician'}
-                                                    </span>
-                                                </td>
-                                                <td className="p-3.5 text-slate-600 dark:text-slate-400">
-                                                    {new Date(a.start_datetime).toLocaleDateString()} {new Date(a.start_datetime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                                                </td>
-                                                <td className="p-3.5">
-                                                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                                                        a.status === 'ACF' ? 'bg-teal-100 text-teal-800 dark:bg-teal-900/50 dark:text-teal-300' :
-                                                        a.status === 'APH' ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/50 dark:text-emerald-300' :
-                                                        a.status === 'CVI' ? 'bg-rose-100 text-rose-800 dark:bg-rose-900/50 dark:text-rose-300' :
-                                                        a.status === 'NSW' ? 'bg-red-100 text-red-800 dark:bg-red-900/50 dark:text-red-300' :
-                                                        'bg-amber-100 text-amber-800 dark:bg-amber-900/50 dark:text-amber-300'
+                        {/* Mode 1: Calendar View */}
+                        {appointmentsViewMode === 'calendar' ? (
+                            <div className="p-4">
+                                <div className="grid grid-cols-7 gap-px bg-slate-200 dark:bg-slate-800 border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden">
+                                    {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((day) => (
+                                        <div key={day} className="bg-slate-50 dark:bg-slate-900 p-2 text-center text-xs font-bold text-slate-500">
+                                            {day}
+                                        </div>
+                                    ))}
+
+                                    {getCalendarDays().map(({ date, isCurrentMonth }, idx) => {
+                                        const apptsForDay = getAppointmentsForDate(date);
+                                        const isToday = new Date().toDateString() === date.toDateString();
+
+                                        return (
+                                            <div
+                                                key={idx}
+                                                className={`min-h-[100px] p-1.5 bg-white dark:bg-slate-900 border-t border-slate-100 dark:border-slate-800 flex flex-col ${
+                                                    !isCurrentMonth ? 'opacity-40 bg-slate-50/50 dark:bg-slate-950/40' : ''
+                                                }`}
+                                            >
+                                                <div className="flex items-center justify-between mb-1">
+                                                    <span className={`text-[11px] font-bold px-1.5 py-0.5 rounded-full ${
+                                                        isToday
+                                                            ? 'bg-[#00a5b5] text-white'
+                                                            : 'text-slate-600 dark:text-slate-400'
                                                     }`}>
-                                                        {a.status}
+                                                        {date.getDate()}
                                                     </span>
-                                                </td>
-                                                <td className="p-3.5 font-mono text-slate-500">
-                                                    {a.b24_deal_id ? `Deal #${a.b24_deal_id}` : '—'}
-                                                </td>
-                                                <td className="p-3.5">
-                                                    {a.invoice_reference ? (
-                                                        <span className="text-[11px] font-mono font-bold text-emerald-600">
-                                                            {a.invoice_reference} (AED {a.invoice_total})
+                                                    {apptsForDay.length > 0 && (
+                                                        <span className="text-[10px] font-bold text-teal-600 dark:text-teal-400">
+                                                            {apptsForDay.length} Appts
                                                         </span>
-                                                    ) : (
-                                                        <span className="text-slate-400 text-[11px]">Pending</span>
                                                     )}
+                                                </div>
+
+                                                <div className="space-y-1 overflow-y-auto max-h-[75px] flex-1">
+                                                    {apptsForDay.map((a) => (
+                                                        <div
+                                                            key={a.id}
+                                                            onClick={() => setSelectedAppointmentModal(a)}
+                                                            className={`p-1 rounded text-[10px] cursor-pointer font-medium truncate transition-all shadow-xs ${
+                                                                a.status === 'ACF' ? 'bg-teal-50 text-teal-900 border border-teal-200 dark:bg-teal-950/80 dark:text-teal-200 dark:border-teal-800' :
+                                                                a.status === 'APH' ? 'bg-emerald-50 text-emerald-900 border border-emerald-200 dark:bg-emerald-950/80 dark:text-emerald-200 dark:border-emerald-800' :
+                                                                a.status === 'CVI' ? 'bg-rose-50 text-rose-900 border border-rose-200 dark:bg-rose-950/80 dark:text-rose-200 dark:border-rose-800' :
+                                                                'bg-amber-50 text-amber-900 border border-amber-200 dark:bg-amber-950/80 dark:text-amber-200 dark:border-amber-800'
+                                                            }`}
+                                                            title={`${a.patient_firstname} ${a.patient_lastname} - ${a.doctor_name || 'Physician'}`}
+                                                        >
+                                                            <div className="flex items-center justify-between gap-1 font-bold">
+                                                                <span>{new Date(a.start_datetime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                                                                <span className="font-mono text-[9px]">#{a.unite_appointment_id}</span>
+                                                            </div>
+                                                            <div className="truncate">{a.patient_firstname} {a.patient_lastname}</div>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+                        ) : (
+                            /* Mode 2: Table View */
+                            <div className="overflow-x-auto">
+                                <table className="w-full text-left text-xs">
+                                    <thead className="bg-slate-50 dark:bg-slate-800/60 text-slate-400 font-semibold border-b border-slate-100 dark:border-slate-800">
+                                        <tr>
+                                            <th className="p-3.5">Unite Appt ID</th>
+                                            <th className="p-3.5">Patient Details</th>
+                                            <th className="p-3.5">Clinic & Doctor</th>
+                                            <th className="p-3.5">Date & Time</th>
+                                            <th className="p-3.5">Status</th>
+                                            <th className="p-3.5">Bitrix Deal</th>
+                                            <th className="p-3.5">Tax Invoice</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                                        {filteredAppointments.length === 0 ? (
+                                            <tr>
+                                                <td colSpan={7} className="p-8 text-center text-slate-400">
+                                                    No appointments found matching your criteria.
                                                 </td>
                                             </tr>
-                                        ))
-                                    )}
-                                </tbody>
-                            </table>
-                        </div>
+                                        ) : (
+                                            filteredAppointments.map((a) => (
+                                                <tr key={a.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/30">
+                                                    <td className="p-3.5 font-mono font-bold text-[#00a5b5]">
+                                                        #{a.unite_appointment_id}
+                                                    </td>
+                                                    <td className="p-3.5">
+                                                        <span className="font-bold text-slate-800 dark:text-slate-200 block">
+                                                            {a.patient_firstname} {a.patient_lastname}
+                                                        </span>
+                                                        <span className="text-slate-400 text-[11px] font-mono">
+                                                            {a.patient_mobileno}
+                                                        </span>
+                                                    </td>
+                                                    <td className="p-3.5">
+                                                        <span className="font-semibold block text-slate-700 dark:text-slate-300">
+                                                            {a.clinic_name || a.clinic_id}
+                                                        </span>
+                                                        <span className="text-slate-400 text-[11px]">
+                                                            {a.doctor_name || 'Assigned Physician'}
+                                                        </span>
+                                                    </td>
+                                                    <td className="p-3.5 text-slate-600 dark:text-slate-400">
+                                                        {new Date(a.start_datetime).toLocaleDateString()} {new Date(a.start_datetime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                                    </td>
+                                                    <td className="p-3.5">
+                                                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                                                            a.status === 'ACF' ? 'bg-teal-100 text-teal-800 dark:bg-teal-900/50 dark:text-teal-300' :
+                                                            a.status === 'APH' ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/50 dark:text-emerald-300' :
+                                                            a.status === 'CVI' ? 'bg-rose-100 text-rose-800 dark:bg-rose-900/50 dark:text-rose-300' :
+                                                            a.status === 'NSW' ? 'bg-red-100 text-red-800 dark:bg-red-900/50 dark:text-red-300' :
+                                                            'bg-amber-100 text-amber-800 dark:bg-amber-900/50 dark:text-amber-300'
+                                                        }`}>
+                                                            {a.status}
+                                                        </span>
+                                                    </td>
+                                                    <td className="p-3.5 font-mono text-slate-500">
+                                                        {a.b24_deal_id ? `Deal #${a.b24_deal_id}` : '—'}
+                                                    </td>
+                                                    <td className="p-3.5">
+                                                        {a.invoice_reference ? (
+                                                            <span className="text-[11px] font-mono font-bold text-emerald-600">
+                                                                {a.invoice_reference} (AED {a.invoice_total})
+                                                            </span>
+                                                        ) : (
+                                                            <span className="text-slate-400 text-[11px]">Pending</span>
+                                                        )}
+                                                    </td>
+                                                </tr>
+                                            ))
+                                        )}
+                                    </tbody>
+                                </table>
+                            </div>
+                        )}
                     </div>
                 )}
 
@@ -1757,6 +1939,91 @@ export default function Dashboard({
                                 </button>
                             </div>
                         </form>
+                    </div>
+                </div>
+            )}
+
+            {/* Modal: View Appointment Details */}
+            {selectedAppointmentModal && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+                    <div className="bg-white dark:bg-slate-900 border border-teal-100 dark:border-teal-900 rounded-2xl max-w-lg w-full p-6 shadow-2xl animate-in fade-in zoom-in-95">
+                        <div className="flex items-center justify-between pb-4 border-b border-slate-100 dark:border-slate-800 mb-4">
+                            <div className="flex items-center gap-2">
+                                <Calendar className="w-5 h-5 text-[#00a5b5]" />
+                                <h3 className="text-base font-bold text-slate-900 dark:text-slate-100">
+                                    Appointment #{selectedAppointmentModal.unite_appointment_id || selectedAppointmentModal.id}
+                                </h3>
+                            </div>
+                            <button onClick={() => setSelectedAppointmentModal(null)} className="text-slate-400 hover:text-slate-600">
+                                <X className="w-4 h-4" />
+                            </button>
+                        </div>
+
+                        <div className="space-y-4 text-xs">
+                            <div className="bg-slate-50 dark:bg-slate-800/50 p-4 rounded-xl space-y-2 border border-slate-100 dark:border-slate-800">
+                                <div className="flex items-center justify-between">
+                                    <span className="text-slate-400 font-semibold">Patient Name:</span>
+                                    <span className="font-bold text-slate-800 dark:text-slate-200">
+                                        {selectedAppointmentModal.patient_firstname} {selectedAppointmentModal.patient_lastname}
+                                    </span>
+                                </div>
+                                <div className="flex items-center justify-between">
+                                    <span className="text-slate-400 font-semibold">Mobile Number:</span>
+                                    <span className="font-mono font-semibold text-slate-700 dark:text-slate-300">
+                                        {selectedAppointmentModal.patient_mobileno || '—'}
+                                    </span>
+                                </div>
+                                <div className="flex items-center justify-between">
+                                    <span className="text-slate-400 font-semibold">Clinic Facility:</span>
+                                    <span className="font-semibold text-slate-800 dark:text-slate-200">
+                                        {selectedAppointmentModal.clinic_name || selectedAppointmentModal.clinic_id}
+                                    </span>
+                                </div>
+                                <div className="flex items-center justify-between">
+                                    <span className="text-slate-400 font-semibold">Attending Doctor:</span>
+                                    <span className="font-semibold text-slate-800 dark:text-slate-200">
+                                        {selectedAppointmentModal.doctor_name || 'Assigned Doctor'}
+                                    </span>
+                                </div>
+                                <div className="flex items-center justify-between">
+                                    <span className="text-slate-400 font-semibold">Date & Time:</span>
+                                    <span className="font-semibold text-teal-600">
+                                        {new Date(selectedAppointmentModal.start_datetime).toLocaleString()}
+                                    </span>
+                                </div>
+                                <div className="flex items-center justify-between">
+                                    <span className="text-slate-400 font-semibold">Status:</span>
+                                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-teal-100 text-teal-800 dark:bg-teal-900/50 dark:text-teal-300">
+                                        {selectedAppointmentModal.status} - {selectedAppointmentModal.status_description || 'Confirmed'}
+                                    </span>
+                                </div>
+                                {selectedAppointmentModal.b24_deal_id && (
+                                    <div className="flex items-center justify-between">
+                                        <span className="text-slate-400 font-semibold">Bitrix24 Deal ID:</span>
+                                        <span className="font-mono text-[#00a5b5] font-bold">
+                                            #{selectedAppointmentModal.b24_deal_id}
+                                        </span>
+                                    </div>
+                                )}
+                                {selectedAppointmentModal.invoice_reference && (
+                                    <div className="flex items-center justify-between">
+                                        <span className="text-slate-400 font-semibold">Invoice Ref:</span>
+                                        <span className="font-mono text-emerald-600 font-bold">
+                                            {selectedAppointmentModal.invoice_reference} (AED {selectedAppointmentModal.invoice_total})
+                                        </span>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+
+                        <div className="flex items-center justify-end pt-4 mt-4 border-t border-slate-100 dark:border-slate-800">
+                            <button
+                                onClick={() => setSelectedAppointmentModal(null)}
+                                className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-700 dark:text-slate-200 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200"
+                            >
+                                Close Preview
+                            </button>
+                        </div>
                     </div>
                 </div>
             )}

@@ -682,6 +682,120 @@ class UniteClient
     }
 
     /**
+     * Get Appointments: Live fetch from Unite EMR Gateway (GET /GetAppointmentList) with DB sync merge
+     */
+    public function getAppointments(Tenant $tenant, ?string $clinicId = null, ?string $fromDate = null, ?string $toDate = null, ?string $phoneNo = null): array
+    {
+        $liveAppointments = [];
+        try {
+            $token = $this->ensureValidToken($tenant);
+            $baseUrl = $this->getBaseUrl($tenant);
+            $queryParams = [];
+            if ($clinicId) $queryParams['clinic_id'] = $clinicId;
+            if ($fromDate) $queryParams['from_date'] = $fromDate;
+            if ($toDate) $queryParams['to_date'] = $toDate;
+            if ($phoneNo) $queryParams['mobileno'] = $phoneNo;
+
+            $queryString = !empty($queryParams) ? '?' . http_build_query($queryParams) : '';
+            $url = "{$baseUrl}/GetAppointmentList{$queryString}";
+
+            Log::info("[Unite Appointments] Live GET /GetAppointmentList for tenant {$tenant->name}", ['url' => $url]);
+
+            $response = Http::withoutVerifying()->withHeaders([
+                'Authorization' => 'Bearer ' . $token,
+                'Content-Type' => 'application/json',
+                'Accept' => 'application/json',
+            ])->timeout(15)->get($url);
+
+            if ($response->status() === 404) {
+                $url2 = "{$baseUrl}/GetAppointments{$queryString}";
+                $response = Http::withoutVerifying()->withHeaders([
+                    'Authorization' => 'Bearer ' . $token,
+                    'Content-Type' => 'application/json',
+                    'Accept' => 'application/json',
+                ])->timeout(15)->get($url2);
+            }
+
+            if ($response->successful()) {
+                $data = $response->json();
+                $list = $data['Data'] ?? $data['data'] ?? $data['result'] ?? (is_array($data) && array_is_list($data) ? $data : []);
+                if (is_array($list)) {
+                    foreach ($list as $item) {
+                        $liveAppointments[] = [
+                            'id' => (string) ($item['appointment_id'] ?? $item['AppointmentId'] ?? $item['id'] ?? Str::uuid()),
+                            'unite_appointment_id' => (string) ($item['appointment_id'] ?? $item['AppointmentId'] ?? $item['id'] ?? ''),
+                            'b24_deal_id' => (string) ($item['b24_deal_id'] ?? $item['deal_id'] ?? ''),
+                            'b24_lead_id' => (string) ($item['b24_lead_id'] ?? $item['lead_id'] ?? ''),
+                            'clinic_id' => (string) ($item['clinic_id'] ?? $item['ClinicId'] ?? ''),
+                            'clinic_name' => (string) ($item['clinic_name'] ?? $item['ClinicName'] ?? ''),
+                            'doctor_id' => (string) ($item['doctor_id'] ?? $item['DoctorId'] ?? ''),
+                            'doctor_name' => (string) ($item['doctor_name'] ?? $item['DoctorName'] ?? ''),
+                            'patient_firstname' => (string) ($item['patient_firstname'] ?? $item['FirstName'] ?? $item['firstname'] ?? ''),
+                            'patient_lastname' => (string) ($item['patient_lastname'] ?? $item['LastName'] ?? $item['lastname'] ?? ''),
+                            'patient_mobileno' => (string) ($item['patient_mobileno'] ?? $item['MobileNo'] ?? $item['mobileno'] ?? ''),
+                            'start_datetime' => (string) ($item['start_datetime'] ?? $item['AppointmentDate'] ?? $item['datetime'] ?? now()->toIso8601String()),
+                            'duration_minutes' => (int) ($item['duration_minutes'] ?? $item['Duration'] ?? 30),
+                            'status' => (string) ($item['status'] ?? $item['Status'] ?? 'ACF'),
+                            'status_description' => (string) ($item['status_description'] ?? $item['StatusDescription'] ?? 'Confirmed'),
+                            'invoice_reference' => (string) ($item['invoice_reference'] ?? $item['InvoiceRef'] ?? ''),
+                            'invoice_total' => (float) ($item['invoice_total'] ?? $item['InvoiceTotal'] ?? 0),
+                        ];
+                    }
+                }
+            }
+        } catch (\Exception $e) {
+            Log::warning("[Unite Appointments] Live fetch skipped/failed for {$tenant->name}: {$e->getMessage()}");
+        }
+
+        // Merge with local DB appointments
+        $dbQuery = Appointment::where('tenant_id', $tenant->id);
+        if ($phoneNo) {
+            $digits = preg_replace('/[^\d]/', '', $phoneNo);
+            $lastDigits = strlen($digits) >= 8 ? substr($digits, -8) : $digits;
+            if ($lastDigits) {
+                $dbQuery->where('patient_mobileno', 'like', "%{$lastDigits}%");
+            }
+        }
+        $dbAppointments = $dbQuery->latest()->get()->map(function ($app) {
+            return [
+                'id' => (string) $app->id,
+                'unite_appointment_id' => (string) $app->unite_appointment_id,
+                'b24_deal_id' => (string) $app->b24_deal_id,
+                'b24_lead_id' => (string) $app->b24_lead_id,
+                'clinic_id' => (string) $app->clinic_id,
+                'clinic_name' => (string) $app->clinic_name,
+                'doctor_id' => (string) $app->doctor_id,
+                'doctor_name' => (string) $app->doctor_name,
+                'patient_firstname' => (string) $app->patient_firstname,
+                'patient_lastname' => (string) $app->patient_lastname,
+                'patient_mobileno' => (string) $app->patient_mobileno,
+                'start_datetime' => $app->start_datetime ? $app->start_datetime->toIso8601String() : '',
+                'duration_minutes' => (int) $app->duration_minutes,
+                'status' => (string) $app->status,
+                'status_description' => (string) $app->status_description,
+                'invoice_reference' => (string) $app->invoice_reference,
+                'invoice_total' => (float) $app->invoice_total,
+                'tenant' => ['name' => $app->tenant->name ?? ''],
+            ];
+        })->toArray();
+
+        // Key by unite_appointment_id or id to deduplicate
+        $merged = [];
+        foreach ($dbAppointments as $app) {
+            $key = $app['unite_appointment_id'] ?: $app['id'];
+            $merged[$key] = $app;
+        }
+        foreach ($liveAppointments as $app) {
+            $key = $app['unite_appointment_id'] ?: $app['id'];
+            if ($key) {
+                $merged[$key] = array_merge($merged[$key] ?? [], array_filter($app));
+            }
+        }
+
+        return array_values($merged);
+    }
+
+    /**
      * Create Appointment: POST /CreateAppointment or POST /CreateAppointmentWithItemDetails
      */
     /**
