@@ -1171,7 +1171,15 @@ export default function DealTabWidget({
                             </button>
                         </div>
 
-                        {itemsError && (
+                        {itemsError && (itemsError.includes('items count: 0') || itemsError.includes('No Data Found')) ? (
+                            <div className="mb-4 p-3.5 rounded-xl bg-teal-50/70 dark:bg-teal-950/40 border border-teal-200 dark:border-teal-800/60 text-xs text-teal-800 dark:text-teal-200 flex items-start gap-2.5">
+                                <Sparkles className="w-4 h-4 mt-0.5 shrink-0 text-[#00a5b5]" />
+                                <div>
+                                    <span className="font-bold">Unite EMR Connected: </span>
+                                    <span>No medical procedures are currently configured in Unite EMR for this clinic facility. Standard appointments can be booked directly.</span>
+                                </div>
+                            </div>
+                        ) : itemsError ? (
                             <div className="mb-4 p-3 rounded-xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 text-xs text-amber-800 dark:text-amber-200 flex items-start gap-2">
                                 <AlertCircle className="w-4 h-4 mt-0.5 shrink-0 text-amber-500" />
                                 <div>
@@ -1179,7 +1187,7 @@ export default function DealTabWidget({
                                     <span>{itemsError}</span>
                                 </div>
                             </div>
-                        )}
+                        ) : null}
 
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-5">
                             {availableItems.length === 0 ? (
