@@ -44,8 +44,8 @@
       "_jsx-runtime-CcBQsCQo.js"
     ]
   },
-  "_dialog-Dqx6F9Ar.js": {
-    "file": "assets/dialog-Dqx6F9Ar.js",
+  "_dialog-Bpzert0G.js": {
+    "file": "assets/dialog-Bpzert0G.js",
     "name": "dialog",
     "imports": [
       "_rolldown-runtime-CbXtAM7H.js",
@@ -155,8 +155,8 @@
       "_confirm-S4FPSMLB.js"
     ]
   },
-  "_password-input-D8ScOJN9.js": {
-    "file": "assets/password-input-D8ScOJN9.js",
+  "_password-input-D2W5N78g.js": {
+    "file": "assets/password-input-D2W5N78g.js",
     "name": "password-input",
     "imports": [
       "_rolldown-runtime-CbXtAM7H.js",
@@ -265,7 +265,7 @@
     "isEntry": true
   },
   "resources/js/app.tsx": {
-    "file": "assets/app-BnXN7s20.js",
+    "file": "assets/app-CjO91x3r.js",
     "name": "app",
     "src": "resources/js/app.tsx",
     "isEntry": true,
@@ -297,7 +297,7 @@
     ]
   },
   "resources/js/pages/Bitrix/DealTabWidget.tsx": {
-    "file": "assets/DealTabWidget-BMPIRtcy.js",
+    "file": "assets/DealTabWidget-E_4bsA7F.js",
     "name": "DealTabWidget",
     "src": "resources/js/pages/Bitrix/DealTabWidget.tsx",
     "isDynamicEntry": true,
@@ -327,7 +327,7 @@
     ]
   },
   "resources/js/pages/auth/confirm-password.tsx": {
-    "file": "assets/confirm-password-BWcLiza1.js",
+    "file": "assets/confirm-password-CgT8l0LO.js",
     "name": "confirm-password",
     "src": "resources/js/pages/auth/confirm-password.tsx",
     "isDynamicEntry": true,
@@ -338,7 +338,7 @@
       "_key-round-CkIFY4yR.js",
       "resources/js/app.tsx",
       "_input-error-BxNCd8Aj.js",
-      "_password-input-D8ScOJN9.js",
+      "_password-input-D2W5N78g.js",
       "_label-Di6fRVm6.js",
       "_spinner-Ci3Ol6Jh.js",
       "_confirm-S4FPSMLB.js",
@@ -346,7 +346,7 @@
     ]
   },
   "resources/js/pages/auth/forgot-password.tsx": {
-    "file": "assets/forgot-password-BRZ98xbn.js",
+    "file": "assets/forgot-password-Sdd4F4NG.js",
     "name": "forgot-password",
     "src": "resources/js/pages/auth/forgot-password.tsx",
     "isDynamicEntry": true,
@@ -363,7 +363,7 @@
     ]
   },
   "resources/js/pages/auth/login.tsx": {
-    "file": "assets/login-QRkrXiIl.js",
+    "file": "assets/login-wSHHuEnD.js",
     "name": "login",
     "src": "resources/js/pages/auth/login.tsx",
     "isDynamicEntry": true,
@@ -379,7 +379,7 @@
       "_shield-check-BBxON2V6.js",
       "resources/js/app.tsx",
       "_input-error-BxNCd8Aj.js",
-      "_password-input-D8ScOJN9.js",
+      "_password-input-D2W5N78g.js",
       "_label-Di6fRVm6.js",
       "_spinner-Ci3Ol6Jh.js",
       "_text-link-B0mV1jio.js",
@@ -387,7 +387,7 @@
     ]
   },
   "resources/js/pages/auth/register.tsx": {
-    "file": "assets/register-C4B0QTny.js",
+    "file": "assets/register-DKtyUFk5.js",
     "name": "register",
     "src": "resources/js/pages/auth/register.tsx",
     "isDynamicEntry": true,
@@ -397,14 +397,14 @@
       "_button-i5b7dYtu.js",
       "resources/js/app.tsx",
       "_input-error-BxNCd8Aj.js",
-      "_password-input-D8ScOJN9.js",
+      "_password-input-D2W5N78g.js",
       "_label-Di6fRVm6.js",
       "_spinner-Ci3Ol6Jh.js",
       "_text-link-B0mV1jio.js"
     ]
   },
   "resources/js/pages/auth/reset-password.tsx": {
-    "file": "assets/reset-password-DkRl6HaI.js",
+    "file": "assets/reset-password-BIxr0GQq.js",
     "name": "reset-password",
     "src": "resources/js/pages/auth/reset-password.tsx",
     "isDynamicEntry": true,
@@ -414,14 +414,14 @@
       "_button-i5b7dYtu.js",
       "resources/js/app.tsx",
       "_input-error-BxNCd8Aj.js",
-      "_password-input-D8ScOJN9.js",
+      "_password-input-D2W5N78g.js",
       "_label-Di6fRVm6.js",
       "_spinner-Ci3Ol6Jh.js",
       "_password-B5WlOolT.js"
     ]
   },
   "resources/js/pages/auth/two-factor-challenge.tsx": {
-    "file": "assets/two-factor-challenge-CxrQ9caU.js",
+    "file": "assets/two-factor-challenge-BGIq12Jz.js",
     "name": "two-factor-challenge",
     "src": "resources/js/pages/auth/two-factor-challenge.tsx",
     "isDynamicEntry": true,
@@ -436,7 +436,7 @@
     ]
   },
   "resources/js/pages/auth/verify-email.tsx": {
-    "file": "assets/verify-email-KRElmbiw.js",
+    "file": "assets/verify-email-C-jxV5UP.js",
     "name": "verify-email",
     "src": "resources/js/pages/auth/verify-email.tsx",
     "isDynamicEntry": true,
@@ -451,7 +451,7 @@
     ]
   },
   "resources/js/pages/dashboard.tsx": {
-    "file": "assets/dashboard-DX8dZbiV.js",
+    "file": "assets/dashboard-DATmIYUS.js",
     "name": "dashboard",
     "src": "resources/js/pages/dashboard.tsx",
     "isDynamicEntry": true,
@@ -471,7 +471,7 @@
     ]
   },
   "resources/js/pages/settings/appearance.tsx": {
-    "file": "assets/appearance-05jKGiXs.js",
+    "file": "assets/appearance-C2CUDfn1.js",
     "name": "appearance",
     "src": "resources/js/pages/settings/appearance.tsx",
     "isDynamicEntry": true,
@@ -484,7 +484,7 @@
     ]
   },
   "resources/js/pages/settings/profile.tsx": {
-    "file": "assets/profile-D18ex4WK.js",
+    "file": "assets/profile-CAICAFhc.js",
     "name": "profile",
     "src": "resources/js/pages/settings/profile.tsx",
     "isDynamicEntry": true,
@@ -495,14 +495,14 @@
       "_button-i5b7dYtu.js",
       "resources/js/app.tsx",
       "_input-error-BxNCd8Aj.js",
-      "_password-input-D8ScOJN9.js",
+      "_password-input-D2W5N78g.js",
       "_label-Di6fRVm6.js",
       "_verification-Ax0eciIl.js",
-      "_dialog-Dqx6F9Ar.js"
+      "_dialog-Bpzert0G.js"
     ]
   },
   "resources/js/pages/settings/security.tsx": {
-    "file": "assets/security-Ce_SVmt3.js",
+    "file": "assets/security-BUJlb6Tv.js",
     "name": "security",
     "src": "resources/js/pages/settings/security.tsx",
     "isDynamicEntry": true,
@@ -522,15 +522,15 @@
       "_trash-2-DmedQwcR.js",
       "resources/js/app.tsx",
       "_input-error-BxNCd8Aj.js",
-      "_password-input-D8ScOJN9.js",
+      "_password-input-D2W5N78g.js",
       "_label-Di6fRVm6.js",
       "_spinner-Ci3Ol6Jh.js",
       "_react-CQROQ_cc.js",
-      "_dialog-Dqx6F9Ar.js"
+      "_dialog-Bpzert0G.js"
     ]
   },
   "resources/js/pages/welcome.tsx": {
-    "file": "assets/welcome-D_MsoMvo.js",
+    "file": "assets/welcome-KcVmJ2mZ.js",
     "name": "welcome",
     "src": "resources/js/pages/welcome.tsx",
     "isDynamicEntry": true,

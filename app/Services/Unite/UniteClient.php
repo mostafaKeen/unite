@@ -522,12 +522,30 @@ class UniteClient
      * Fetches live medical items and procedures catalog directly from Unite EMR Gateway.
      * No local database cache is read or updated.
      */
-    public function getItemDetails(Tenant $tenant): array
+    /**
+     * Get Item Details with Full Diagnostics: returns ['items' => [...], 'diagnostics' => [...]]
+     */
+    public function getItemDetailsWithDiagnostics(Tenant $tenant, ?string $clinicId = null): array
     {
+        $diagnostics = [
+            'tenant' => $tenant->name,
+            'tenant_id' => $tenant->id,
+            'environment' => $tenant->unite_environment,
+            'endpoint_requested' => null,
+            'token_preview' => null,
+            'http_status' => null,
+            'api_status' => null,
+            'api_message' => null,
+            'raw_response' => null,
+            'error' => null,
+        ];
+
         try {
             $token = $this->ensureValidToken($tenant);
             $baseUrl = $this->getBaseUrl($tenant);
             $primaryUrl = "{$baseUrl}/GetItemDetails";
+            $diagnostics['endpoint_requested'] = $primaryUrl;
+            $diagnostics['token_preview'] = substr($token, 0, 15) . '...';
 
             Log::info("[Unite Directory] getItemDetails live request to Unite EMR API", [
                 'tenant' => $tenant->name,
@@ -544,6 +562,7 @@ class UniteClient
             // Fallback for case-sensitive gateways: if 404, try lowercase /getitemdetails
             if ($response->status() === 404) {
                 $lowercaseUrl = "{$baseUrl}/getitemdetails";
+                $diagnostics['endpoint_requested'] = $lowercaseUrl;
                 Log::info("[Unite Directory] Primary /GetItemDetails returned 404. Retrying with {$lowercaseUrl}");
                 $response = Http::withoutVerifying()->withHeaders([
                     'Authorization' => 'Bearer ' . $token,
@@ -552,22 +571,62 @@ class UniteClient
                 ])->timeout(20)->get($lowercaseUrl);
             }
 
+            // Fallback for clinic-specific query parameter if provided and initial call returned 404 or empty
+            if ($clinicId && ($response->status() === 404 || ($response->successful() && empty($response->json()['data']) && empty($response->json()['Data'])))) {
+                $clinicUrl = "{$baseUrl}/GetItemDetails?clinic_id=" . urlencode($clinicId);
+                $diagnostics['endpoint_requested'] = $clinicUrl;
+                Log::info("[Unite Directory] Attempting clinic-specific /GetItemDetails?clinic_id={$clinicId}");
+                $clinicResponse = Http::withoutVerifying()->withHeaders([
+                    'Authorization' => 'Bearer ' . $token,
+                    'Content-Type' => 'application/json',
+                    'Accept' => 'application/json',
+                ])->timeout(20)->get($clinicUrl);
+
+                if ($clinicResponse->successful() && (!empty($clinicResponse->json()['data']) || !empty($clinicResponse->json()['Data']))) {
+                    $response = $clinicResponse;
+                }
+            }
+
             $status = $response->status();
             $body = $response->body();
             $data = $response->json();
-            $itemsList = $data['data'] ?? $data['Data'] ?? null;
+
+            $diagnostics['http_status'] = $status;
+            $diagnostics['raw_response'] = Str::limit($body, 1000);
+            $diagnostics['api_status'] = is_array($data) ? ($data['status'] ?? $data['Status'] ?? null) : null;
+            $diagnostics['api_message'] = is_array($data) ? ($data['message'] ?? $data['Message'] ?? null) : null;
+
+            // Resolve items list from various possible JSON response structures
+            $itemsList = null;
+            if (is_array($data)) {
+                if (isset($data['data']) && is_array($data['data'])) {
+                    $itemsList = $data['data'];
+                } elseif (isset($data['Data']) && is_array($data['Data'])) {
+                    $itemsList = $data['Data'];
+                } elseif (isset($data['items']) && is_array($data['items'])) {
+                    $itemsList = $data['items'];
+                } elseif (isset($data['Items']) && is_array($data['Items'])) {
+                    $itemsList = $data['Items'];
+                } elseif (isset($data['result']) && is_array($data['result'])) {
+                    $itemsList = $data['result'];
+                } elseif (isset($data['Result']) && is_array($data['Result'])) {
+                    $itemsList = $data['Result'];
+                } elseif (array_is_list($data) && isset($data[0]) && is_array($data[0])) {
+                    $itemsList = $data;
+                }
+            }
 
             Log::info("[Unite Directory] getItemDetails live response from Unite EMR", [
                 'tenant' => $tenant->name,
                 'http_status' => $status,
-                'api_status' => $data['status'] ?? $data['Status'] ?? 'N/A',
-                'api_message' => $data['message'] ?? $data['Message'] ?? 'N/A',
+                'api_status' => $diagnostics['api_status'] ?? 'N/A',
+                'api_message' => $diagnostics['api_message'] ?? 'N/A',
                 'items_count' => is_array($itemsList) ? count($itemsList) : 0,
                 'body_preview' => Str::limit($body, 300),
             ]);
 
-            if ($response->successful() && is_array($itemsList)) {
-                return array_map(function ($item) {
+            if ($response->successful() && is_array($itemsList) && count($itemsList) > 0) {
+                $parsedItems = array_map(function ($item) {
                     $pkgDetails = [];
                     $rawPkg = $item['PackageItemDetails'] ?? $item['package_item_details'] ?? null;
                     if (is_array($rawPkg)) {
@@ -588,12 +647,38 @@ class UniteClient
                         'PackageItemDetails' => $pkgDetails,
                     ];
                 }, $itemsList);
+
+                return [
+                    'items' => $parsedItems,
+                    'diagnostics' => $diagnostics,
+                ];
+            }
+
+            if (!$response->successful()) {
+                $diagnostics['error'] = "Unite API returned HTTP {$status}: " . ($diagnostics['api_message'] ?? $body);
+            } elseif (!is_array($itemsList) || count($itemsList) === 0) {
+                $diagnostics['error'] = "Unite API status: '{$diagnostics['api_status']}', message: '{$diagnostics['api_message']}', items count: 0";
             }
         } catch (\Exception $e) {
+            $diagnostics['error'] = $e->getMessage();
             Log::warning("[Unite Directory] getItemDetails live fetch from Unite EMR failed for {$tenant->name}: {$e->getMessage()}");
         }
 
-        return [];
+        return [
+            'items' => [],
+            'diagnostics' => $diagnostics,
+        ];
+    }
+
+    /**
+     * Get Item Details: GET /GetItemDetails (Unite EMR v4.2)
+     * Fetches live medical items and procedures catalog directly from Unite EMR Gateway.
+     */
+    public function getItemDetails(Tenant $tenant, mixed $param = null): array
+    {
+        $clinicId = is_string($param) ? $param : null;
+        $result = $this->getItemDetailsWithDiagnostics($tenant, $clinicId);
+        return $result['items'] ?? [];
     }
 
     /**

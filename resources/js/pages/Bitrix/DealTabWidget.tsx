@@ -189,9 +189,10 @@ export default function DealTabWidget({
     );
 
     // Fetch live items directly from /items API
-    const refreshItems = async () => {
+    const refreshItems = async (clinicId?: string) => {
         setLoadingItems(true);
-        const endpoint = `/b24/widget/deal-tab/${tenant.id}/items`;
+        const targetClinic = clinicId || selectedClinicId;
+        const endpoint = `/b24/widget/deal-tab/${tenant.id}/items${targetClinic ? '?clinic_id=' + encodeURIComponent(targetClinic) : ''}`;
         console.log(`%c[Unite Widget] 🔄 GET ${endpoint}`, 'color: #0284c7; font-weight: bold;');
         try {
             const res = await fetch(endpoint);
@@ -202,10 +203,22 @@ export default function DealTabWidget({
             console.log('Tenant:', data.tenant);
             console.log('Has Credentials:', data.has_credentials);
             console.log('Items Count:', data.count);
+            console.log('Diagnostics:', data.diagnostics);
+            if (data.diagnostics) {
+                console.log('→ Unite EMR Endpoint Called:', data.diagnostics.endpoint_requested);
+                console.log('→ Unite EMR HTTP Status:', data.diagnostics.http_status);
+                console.log('→ Unite EMR API Status:', data.diagnostics.api_status);
+                console.log('→ Unite EMR API Message:', data.diagnostics.api_message);
+                console.log('→ Unite EMR Raw Body Preview:', data.diagnostics.raw_response);
+                if (data.diagnostics.error) {
+                    console.error('→ Unite EMR Error Note:', data.diagnostics.error);
+                }
+            }
             console.log('Items Payload:', data.items);
-            if (data.error) {
-                console.error('[Unite Widget] ❌ API Error Message:', data.error);
-                setItemsError(data.error);
+            if (data.error || data.diagnostics?.error) {
+                const errDetail = data.error || data.diagnostics?.error;
+                console.error('[Unite Widget] ❌ API Error Message:', errDetail);
+                setItemsError(errDetail);
             } else {
                 setItemsError(null);
             }

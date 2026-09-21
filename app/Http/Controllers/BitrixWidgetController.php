@@ -257,13 +257,16 @@ class BitrixWidgetController extends Controller
     /**
      * Live fetch item details directly from Unite EMR API for the embedded widget
      */
-    public function getItems(Tenant $tenant): JsonResponse
+    public function getItems(Request $request, Tenant $tenant): JsonResponse
     {
         $hasCredentials = (!empty($tenant->unite_app_id) || env('UNITE_APP_ID')) && 
                           (!empty($tenant->unite_app_key) || env('UNITE_APP_KEY'));
 
+        $clinicId = $request->query('clinic_id');
+
         Log::info("[Bitrix Widget] getItems requested for Tenant '{$tenant->name}' (ID: {$tenant->id})", [
             'has_credentials' => $hasCredentials,
+            'clinic_id' => $clinicId,
             'unite_environment' => $tenant->unite_environment,
             'unite_base_url' => $tenant->unite_base_url,
         ]);
@@ -276,17 +279,23 @@ class BitrixWidgetController extends Controller
                 'error' => "Unite EMR credentials (App ID / App Key) are not configured for tenant '{$tenant->name}'.",
                 'count' => 0,
                 'items' => [],
+                'diagnostics' => null,
             ]);
         }
 
         try {
-            $items = $this->uniteClient->getItemDetails($tenant);
+            $result = $this->uniteClient->getItemDetailsWithDiagnostics($tenant, $clinicId);
+            $items = $result['items'] ?? [];
+            $diagnostics = $result['diagnostics'] ?? [];
+
             return response()->json([
-                'success' => true,
+                'success' => !empty($items) || empty($diagnostics['error']),
                 'tenant' => $tenant->name,
                 'has_credentials' => true,
                 'count' => count($items),
                 'items' => $items,
+                'diagnostics' => $diagnostics,
+                'error' => $diagnostics['error'] ?? null,
             ]);
         } catch (\Exception $e) {
             Log::error("[Bitrix Widget] getItems failed for Tenant '{$tenant->name}': {$e->getMessage()}");
@@ -297,6 +306,7 @@ class BitrixWidgetController extends Controller
                 'error' => $e->getMessage(),
                 'count' => 0,
                 'items' => [],
+                'diagnostics' => null,
             ]);
         }
     }
