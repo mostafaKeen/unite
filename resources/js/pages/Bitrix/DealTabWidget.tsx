@@ -163,6 +163,11 @@ export default function DealTabWidget({
         !selectedClinicId || (d.clinics && d.clinics.includes(selectedClinicId))
     );
 
+    // Filter items by selected clinic (or items applicable to all clinics)
+    const availableItems = items.filter(item => 
+        !item.clinic_id || !selectedClinicId || item.clinic_id === selectedClinicId
+    );
+
     // Initialize Bitrix24 JS SDK & Client-Side Fallback Fetching
     useEffect(() => {
         const initBX24 = () => {
@@ -1014,46 +1019,53 @@ export default function DealTabWidget({
                         </div>
 
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-5">
-                            {items.map((item) => {
-                                const isChecked = selectedItemCodes.includes(item.item_code);
-                                return (
-                                    <div
-                                        key={item.item_code}
-                                        onClick={() => {
-                                            if (isChecked) {
-                                                setSelectedItemCodes(selectedItemCodes.filter(c => c !== item.item_code));
-                                            } else {
-                                                setSelectedItemCodes([...selectedItemCodes, item.item_code]);
-                                            }
-                                        }}
-                                        className={`cursor-pointer p-3.5 rounded-xl border transition-all flex items-start justify-between ${
-                                            isChecked
-                                                ? 'border-[#00a5b5] bg-teal-50/50 dark:bg-teal-950/30'
-                                                : 'border-slate-200 dark:border-slate-700 hover:border-slate-300'
-                                        }`}
-                                    >
-                                        <div className="flex items-start gap-2.5">
-                                            <input
-                                                type="checkbox"
-                                                checked={isChecked}
-                                                readOnly
-                                                className="mt-1 rounded text-[#00a5b5] focus:ring-[#00a5b5]"
-                                            />
-                                            <div>
-                                                <span className="text-xs font-bold text-slate-800 dark:text-slate-200 block">
-                                                    {item.item_description}
-                                                </span>
-                                                <span className="text-[10px] text-slate-400">
-                                                    Code: #{item.item_code} • {item.average_time_in_minutes || 20} min
-                                                </span>
+                            {availableItems.length === 0 ? (
+                                <div className="col-span-1 md:col-span-2 py-4 px-3 rounded-xl bg-slate-50 dark:bg-slate-800/40 text-center text-xs text-slate-400">
+                                    No specific procedures listed for this clinic facility. Standard appointment will be scheduled.
+                                </div>
+                            ) : (
+                                availableItems.map((item) => {
+                                    const isChecked = selectedItemCodes.includes(item.item_code);
+                                    return (
+                                        <div
+                                            key={item.item_code}
+                                            onClick={() => {
+                                                if (isChecked) {
+                                                    setSelectedItemCodes(selectedItemCodes.filter(c => c !== item.item_code));
+                                                } else {
+                                                    setSelectedItemCodes([...selectedItemCodes, item.item_code]);
+                                                }
+                                            }}
+                                            className={`cursor-pointer p-3.5 rounded-xl border transition-all flex items-start justify-between ${
+                                                isChecked
+                                                    ? 'border-[#00a5b5] bg-teal-50/50 dark:bg-teal-950/30'
+                                                    : 'border-slate-200 dark:border-slate-700 hover:border-slate-300'
+                                            }`}
+                                        >
+                                            <div className="flex items-start gap-2.5">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={isChecked}
+                                                    readOnly
+                                                    className="mt-1 rounded text-[#00a5b5] focus:ring-[#00a5b5]"
+                                                />
+                                                <div>
+                                                    <span className="text-xs font-bold text-slate-800 dark:text-slate-200 block">
+                                                        {item.item_description}
+                                                    </span>
+                                                    <span className="text-[10px] text-slate-400">
+                                                        Code: #{item.item_code} • {item.average_time_in_minutes || 20} min
+                                                        {item.PackageItemDetails && item.PackageItemDetails.length > 0 && ` • ${item.PackageItemDetails.length} package components`}
+                                                    </span>
+                                                </div>
                                             </div>
+                                            <span className="text-xs font-bold text-[#00a5b5]">
+                                                AED {Number(item.price).toFixed(2)}
+                                            </span>
                                         </div>
-                                        <span className="text-xs font-bold text-[#00a5b5]">
-                                            AED {Number(item.price).toFixed(2)}
-                                        </span>
-                                    </div>
-                                );
-                            })}
+                                    );
+                                })
+                            )}
                         </div>
 
                         {/* Calculation summary */}

@@ -518,37 +518,20 @@ class UniteClient
     }
 
     /**
-     * Get Item Details: GET /GetItemDetails
+     * Get Item Details: GET /GetItemDetails (Unite EMR v4.2)
+     * Fetches live medical items and procedures catalog directly from Unite EMR Gateway.
+     * No local database cache is read or updated.
      */
-    public function getItemDetails(Tenant $tenant, bool $forceRefresh = false): array
+    public function getItemDetails(Tenant $tenant): array
     {
-        $hasSampleItems = false;
-        if (!empty($tenant->items_cache)) {
-            foreach ($tenant->items_cache as $item) {
-                $code = (int) ($item['item_code'] ?? 0);
-                if (in_array($code, [101, 102, 20842, 305, 501])) {
-                    $hasSampleItems = true;
-                    break;
-                }
-            }
-        }
-
-        if (!$forceRefresh && !$hasSampleItems && !empty($tenant->items_cache)) {
-            Log::info("[Unite Directory] getItemDetails returning from cache", [
-                'tenant' => $tenant->name,
-                'cached_count' => count($tenant->items_cache),
-            ]);
-            return $tenant->items_cache;
-        }
-
         try {
             $token = $this->ensureValidToken($tenant);
             $baseUrl = $this->getBaseUrl($tenant);
-            $url = "{$baseUrl}/GetItemDetails";
+            $primaryUrl = "{$baseUrl}/GetItemDetails";
 
-            Log::info("[Unite Directory] getItemDetails live request", [
+            Log::info("[Unite Directory] getItemDetails live request to Unite EMR API", [
                 'tenant' => $tenant->name,
-                'url' => $url,
+                'url' => $primaryUrl,
                 'token_preview' => substr($token, 0, 15) . '...',
             ]);
 
@@ -556,42 +539,58 @@ class UniteClient
                 'Authorization' => 'Bearer ' . $token,
                 'Content-Type' => 'application/json',
                 'Accept' => 'application/json',
-            ])->timeout(20)->get($url);
+            ])->timeout(20)->get($primaryUrl);
+
+            // Fallback for case-sensitive gateways: if 404, try lowercase /getitemdetails
+            if ($response->status() === 404) {
+                $lowercaseUrl = "{$baseUrl}/getitemdetails";
+                Log::info("[Unite Directory] Primary /GetItemDetails returned 404. Retrying with {$lowercaseUrl}");
+                $response = Http::withoutVerifying()->withHeaders([
+                    'Authorization' => 'Bearer ' . $token,
+                    'Content-Type' => 'application/json',
+                    'Accept' => 'application/json',
+                ])->timeout(20)->get($lowercaseUrl);
+            }
 
             $status = $response->status();
             $body = $response->body();
             $data = $response->json();
-            $itemsList = $data['Data'] ?? $data['data'] ?? null;
+            $itemsList = $data['data'] ?? $data['Data'] ?? null;
 
-            Log::info("[Unite Directory] getItemDetails live response", [
+            Log::info("[Unite Directory] getItemDetails live response from Unite EMR", [
                 'tenant' => $tenant->name,
                 'http_status' => $status,
+                'api_status' => $data['status'] ?? $data['Status'] ?? 'N/A',
+                'api_message' => $data['message'] ?? $data['Message'] ?? 'N/A',
                 'items_count' => is_array($itemsList) ? count($itemsList) : 0,
                 'body_preview' => Str::limit($body, 300),
             ]);
 
-            if ($response->successful() && is_array($itemsList) && count($itemsList) > 0) {
-                $normalizedItems = array_map(function ($item) {
+            if ($response->successful() && is_array($itemsList)) {
+                return array_map(function ($item) {
+                    $pkgDetails = [];
+                    $rawPkg = $item['PackageItemDetails'] ?? $item['package_item_details'] ?? null;
+                    if (is_array($rawPkg)) {
+                        $pkgDetails = array_map(function ($pkg) {
+                            return [
+                                'cpt_code' => (string) ($pkg['cpt_code'] ?? $pkg['cptcode'] ?? $pkg['CptCode'] ?? ''),
+                                'item_description' => (string) ($pkg['item_description'] ?? $pkg['description'] ?? ''),
+                            ];
+                        }, $rawPkg);
+                    }
+
                     return [
                         'item_code' => (int) ($item['item_code'] ?? $item['itemcode'] ?? $item['ItemCode'] ?? $item['itm_code'] ?? 0),
                         'item_description' => (string) ($item['item_description'] ?? $item['description'] ?? $item['ItemDescription'] ?? ''),
                         'price' => (float) ($item['price'] ?? $item['Price'] ?? $item['item_price'] ?? 0),
                         'clinic_id' => (string) ($item['clinic_id'] ?? $item['clinicid'] ?? $item['ClinicId'] ?? ''),
                         'average_time_in_minutes' => (int) ($item['average_time_in_minutes'] ?? $item['duration'] ?? 20),
-                        'PackageItemDetails' => is_array($item['PackageItemDetails'] ?? null) ? $item['PackageItemDetails'] : [],
+                        'PackageItemDetails' => $pkgDetails,
                     ];
                 }, $itemsList);
-
-                $tenant->update(['items_cache' => $normalizedItems]);
-                return $normalizedItems;
             }
         } catch (\Exception $e) {
-            Log::warning("[Unite Directory] getItemDetails live fetch skipped/failed for {$tenant->name}: {$e->getMessage()}");
-        }
-
-        if (!empty($tenant->items_cache)) {
-            Log::info("[Unite Directory] Using existing items_cache for {$tenant->name}");
-            return $tenant->items_cache;
+            Log::warning("[Unite Directory] getItemDetails live fetch from Unite EMR failed for {$tenant->name}: {$e->getMessage()}");
         }
 
         return [];

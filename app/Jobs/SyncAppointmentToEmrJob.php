@@ -73,7 +73,7 @@ class SyncAppointmentToEmrJob implements ShouldQueue
             'duration' => (string) ($appointment->duration_minutes ?: 30),
             'remarks' => $appointment->remarks ?? 'Booked via Bitrix24 CRM',
             'requestedby' => $appointment->requested_by ?? 'Bitrix24 CRM Agent',
-            'itemcode' => $appointment->item_codes ?: [101],
+            'itemcode' => !empty($appointment->item_codes) ? $appointment->item_codes : [],
             'b24_deal_id' => $appointment->b24_deal_id,
             'b24_lead_id' => $appointment->b24_lead_id,
         ];

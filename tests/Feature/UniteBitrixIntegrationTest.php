@@ -99,6 +99,23 @@ class UniteBitrixIntegrationTest extends TestCase
     public function test_bitrix24_crm_widget_remains_open_without_web_login(): void
     {
         $tenant = Tenant::where('slug', 'unite-healthcare-dubai')->first();
+        $tenant->update([
+            'unite_app_id' => 'test-app-id',
+            'unite_app_key' => 'test-app-key',
+            'unite_access_token' => 'valid_token_test_123',
+            'unite_token_expires_at' => now()->addHours(4),
+        ]);
+
+        \Illuminate\Support\Facades\Http::fake([
+            '*/CreateAppointment*' => \Illuminate\Support\Facades\Http::response([
+                'Status' => 'Success',
+                'Message' => 'Appointment Created Successfully',
+                'Data' => [
+                    'appointmentid' => 12545545,
+                    'appointmentstatus' => 'AAC',
+                ],
+            ], 200),
+        ]);
 
         // Widget view loads without session auth (Bitrix24 iframe context)
         $response = $this->get("/b24/widget/deal-tab/{$tenant->id}?deal_id=1042");
@@ -213,5 +230,64 @@ class UniteBitrixIntegrationTest extends TestCase
         $this->assertEquals('install_access_token_12345', $fresh->b24_access_token);
         $this->assertEquals('install_refresh_token_67890', $fresh->b24_refresh_token);
         $this->assertTrue($fresh->has_b24_oauth);
+    }
+
+    public function test_get_items_fetches_directly_from_unite_emr_api(): void
+    {
+        $superAdmin = User::where('role', User::ROLE_SUPER_ADMIN)->first();
+        $tenant = Tenant::where('slug', 'unite-healthcare-dubai')->first();
+
+        // Configure valid token so client executes GET /GetItemDetails
+        $tenant->update([
+            'unite_access_token' => 'real_unite_token_valid_xyz',
+            'unite_token_expires_at' => now()->addHours(4),
+            'items_cache' => [],
+        ]);
+
+        \Illuminate\Support\Facades\Http::fake([
+            '*/GetItemDetails*' => \Illuminate\Support\Facades\Http::response([
+                'status' => 'Success',
+                'message' => 'Data Fetched Successfully.',
+                'data' => [
+                    [
+                        'clinic_id' => 'DHA-H-44JKWE',
+                        'item_code' => 1001,
+                        'item_description' => 'General Consultation Live',
+                        'price' => 500,
+                        'average_time_in_minutes' => 30,
+                        'PackageItemDetails' => [],
+                    ],
+                    [
+                        'clinic_id' => 'DHA-H-44JKWE',
+                        'item_code' => 2001,
+                        'item_description' => 'Full Body Checkup Live',
+                        'price' => 2500,
+                        'average_time_in_minutes' => 120,
+                        'PackageItemDetails' => [
+                            [
+                                'cpt_code' => 'CPT101',
+                                'item_description' => 'Blood Test',
+                            ],
+                        ],
+                    ],
+                ],
+            ], 200),
+        ]);
+
+        $response = $this->actingAs($superAdmin)->getJson("/tenants/{$tenant->id}/items");
+
+        $response->assertStatus(200)
+            ->assertJson([
+                'success' => true,
+                'source' => 'unite_emr_api',
+                'count' => 2,
+            ])
+            ->assertJsonPath('items.0.item_code', 1001)
+            ->assertJsonPath('items.0.item_description', 'General Consultation Live')
+            ->assertJsonPath('items.1.item_code', 2001)
+            ->assertJsonPath('items.1.PackageItemDetails.0.cpt_code', 'CPT101');
+
+        // Verify no database cache was populated or written
+        $this->assertEmpty($tenant->fresh()->items_cache);
     }
 }
