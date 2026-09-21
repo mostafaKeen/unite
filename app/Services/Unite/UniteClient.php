@@ -4,6 +4,7 @@ namespace App\Services\Unite;
 
 use App\Models\Tenant;
 use App\Models\SyncLog;
+use App\Models\Appointment;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
