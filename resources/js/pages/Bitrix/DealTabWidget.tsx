@@ -67,6 +67,7 @@ interface Props {
         name: string;
         unite_environment: string;
         b24_domain?: string;
+        unite_app_id?: string;
     };
     dealId?: string | number;
     leadId?: string | number;
@@ -82,6 +83,15 @@ interface Props {
     existingAppointment?: Appointment | null;
     statusMap: Record<string, { label: string; color: string; stage?: string }>;
     patientDefaults?: PatientDefaults;
+    placement?: string;
+    hasUniteCredentials?: boolean;
+    uniteDiagnostics?: {
+        hasCredentials?: boolean;
+        error?: string | null;
+        itemsCount?: number;
+        clinicsCount?: number;
+        doctorsCount?: number;
+    };
 }
 
 export default function DealTabWidget({
@@ -96,9 +106,19 @@ export default function DealTabWidget({
     existingAppointment: initialAppointment,
     statusMap = {},
     patientDefaults,
+    placement = 'CRM_DEAL_DETAIL_TAB',
+    hasUniteCredentials = false,
+    uniteDiagnostics,
 }: Props) {
     const [appointment, setAppointment] = useState<Appointment | null>(initialAppointment || null);
     const [showBookingForm, setShowBookingForm] = useState(!initialAppointment);
+
+    // Live items state & diagnostics
+    const [liveItems, setLiveItems] = useState<ItemDetail[]>(items || []);
+    const [loadingItems, setLoadingItems] = useState<boolean>(false);
+    const [itemsError, setItemsError] = useState<string | null>(uniteDiagnostics?.error || null);
+
+    const currentItems = liveItems.length > 0 ? liveItems : items;
 
     // Booking state
     const [selectedClinicId, setSelectedClinicId] = useState<string>(clinics[0]?.clinic_id || '');
@@ -164,66 +184,157 @@ export default function DealTabWidget({
     );
 
     // Filter items by selected clinic (or items applicable to all clinics)
-    const availableItems = items.filter(item => 
-        !item.clinic_id || !selectedClinicId || item.clinic_id === selectedClinicId
+    const availableItems = currentItems.filter(item => 
+        !item.clinic_id || !selectedClinicId || String(item.clinic_id).trim().toLowerCase() === String(selectedClinicId).trim().toLowerCase()
     );
+
+    // Fetch live items directly from /items API
+    const refreshItems = async () => {
+        setLoadingItems(true);
+        const endpoint = `/b24/widget/deal-tab/${tenant.id}/items`;
+        console.log(`%c[Unite Widget] 🔄 GET ${endpoint}`, 'color: #0284c7; font-weight: bold;');
+        try {
+            const res = await fetch(endpoint);
+            console.log(`[Unite Widget] 📥 /items HTTP Status: ${res.status} ${res.statusText}`);
+            const data = await res.json();
+            console.group('%c[Unite Widget] 📦 /items API Response Data', 'color: #059669; font-weight: bold;');
+            console.log('Success flag:', data.success);
+            console.log('Tenant:', data.tenant);
+            console.log('Has Credentials:', data.has_credentials);
+            console.log('Items Count:', data.count);
+            console.log('Items Payload:', data.items);
+            if (data.error) {
+                console.error('[Unite Widget] ❌ API Error Message:', data.error);
+                setItemsError(data.error);
+            } else {
+                setItemsError(null);
+            }
+            console.groupEnd();
+            if (data.success && Array.isArray(data.items)) {
+                setLiveItems(data.items);
+            }
+        } catch (err: any) {
+            console.error('%c[Unite Widget] 💥 Exception fetching /items:', 'color: #dc2626; font-weight: bold;', err);
+            setItemsError(err.message || 'Network error fetching items');
+        } finally {
+            setLoadingItems(false);
+        }
+    };
+
+    // Component Mount Debug Logging
+    useEffect(() => {
+        console.group('%c[Unite Widget] 🚀 DealTabWidget Mounted', 'color: #00a5b5; font-weight: bold; font-size: 13px;');
+        console.log('Tenant details:', tenant);
+        console.log('Context IDs:', { dealId, leadId, contactId, dealContext });
+        console.log('Placement prop:', placement);
+        console.log('Has Unite Credentials prop:', hasUniteCredentials);
+        console.log('Unite Diagnostics from Server:', uniteDiagnostics);
+        console.log('Clinics prop (' + (clinics?.length ?? 0) + '):', clinics);
+        console.log('Doctors prop (' + (doctors?.length ?? 0) + '):', doctors);
+        console.log('Items prop (' + (items?.length ?? 0) + '):', items);
+        console.log('Existing Appointment:', initialAppointment);
+        console.log('Patient Defaults:', patientDefaults);
+        console.log('window.BX24 available:', typeof (window as any).BX24 !== 'undefined');
+        console.groupEnd();
+
+        // Perform live check on /items API
+        refreshItems();
+    }, []);
+
+    // Clinic & Items Matching Debug Logging
+    useEffect(() => {
+        console.group('%c[Unite Widget] 🔍 Clinic & Procedures Matching', 'color: #0d9488; font-weight: bold;');
+        console.log('Selected Clinic ID:', selectedClinicId);
+        console.log('Total Items in State:', currentItems.length);
+        console.log('Filtered Available Items for Clinic:', availableItems.length, availableItems);
+        if (currentItems.length === 0) {
+            console.warn('[Unite Widget] ⚠️ No procedures received from Unite EMR API for this tenant. Check tenant credentials.');
+        } else if (availableItems.length === 0) {
+            console.warn('[Unite Widget] ⚠️ Items exist (' + currentItems.length + ' total), but none match selectedClinicId="' + selectedClinicId + '". Item clinic_ids:', currentItems.map(i => ({ code: i.item_code, desc: i.item_description, clinic_id: i.clinic_id })));
+        } else {
+            console.log('[Unite Widget] ✅ ' + availableItems.length + ' procedures available for selected clinic.');
+        }
+        console.groupEnd();
+    }, [selectedClinicId, currentItems, availableItems.length]);
+
+    // Procedure Selection Debug Logging
+    useEffect(() => {
+        const selectedObjects = currentItems.filter(i => selectedItemCodes.includes(i.item_code));
+        console.log('%c[Unite Widget] 🛒 Selected Procedures (' + selectedItemCodes.length + '):', 'color: #0284c7; font-weight: bold;', {
+            codes: selectedItemCodes,
+            items: selectedObjects,
+            subtotal: selectedObjects.reduce((s, i) => s + Number(i.price), 0),
+        });
+    }, [selectedItemCodes, currentItems]);
 
     // Initialize Bitrix24 JS SDK & Client-Side Fallback Fetching
     useEffect(() => {
         const initBX24 = () => {
-            if (!window.BX24) return;
-            window.BX24.init(() => {
+            const bx24 = (window as any).BX24;
+            console.log('%c[Unite Widget] ⚡ initBX24() invoked. window.BX24 exists:', 'color: #6366f1; font-weight: bold;', Boolean(bx24));
+            if (!bx24) {
+                console.warn('[Unite Widget] ⚠️ window.BX24 is not defined yet.');
+                return;
+            }
+            bx24.init(() => {
+                console.log('%c[Unite Widget] 🟢 window.BX24.init() callback executed!', 'color: #16a34a; font-weight: bold;');
                 try {
-                    window.BX24?.fitWindow();
-                } catch (e) {}
+                    bx24.fitWindow();
+                } catch (e) {
+                    console.warn('[Unite Widget] fitWindow warning:', e);
+                }
 
                 // Fetch current user via BX24 JS SDK
-                window.BX24.callMethod('user.current', {}, (res: any) => {
-                    if (res && typeof res.data === 'function') {
-                        const userData = res.data();
-                        if (userData) {
-                            const userFullName = [userData.NAME, userData.LAST_NAME].filter(Boolean).join(' ');
-                            if (userFullName) {
-                                setPatientData(prev => ({
-                                    ...prev,
-                                    requestedby: prev.requestedby && prev.requestedby !== 'Bitrix24 CRM Agent' ? prev.requestedby : userFullName,
-                                }));
-                            }
+                console.log('[Unite Widget] 👤 Requesting BX24 user.current...');
+                bx24.callMethod('user.current', {}, (res: any) => {
+                    const userData = res && typeof res.data === 'function' ? res.data() : null;
+                    console.log('[Unite Widget] 👤 BX24 user.current result:', userData, res?.error?.());
+                    if (userData) {
+                        const userFullName = [userData.NAME, userData.LAST_NAME].filter(Boolean).join(' ');
+                        if (userFullName) {
+                            setPatientData(prev => ({
+                                ...prev,
+                                requestedby: prev.requestedby && prev.requestedby !== 'Bitrix24 CRM Agent' ? prev.requestedby : userFullName,
+                            }));
                         }
                     }
                 });
 
                 // Fetch entity data via BX24 JS SDK if patient fields are empty
                 try {
-                    const placementInfo = window.BX24.placement.info();
+                    const placementInfo = bx24.placement?.info ? bx24.placement.info() : null;
+                    console.log('[Unite Widget] 📌 BX24 placement info:', placementInfo);
                     const entityId = placementInfo?.options?.ID || placementInfo?.options?.id || dealId || leadId || contactId;
+                    console.log('[Unite Widget] 🎯 Target Entity ID for BX24 call:', entityId);
 
                     if (entityId) {
                         let method = 'crm.deal.get';
                         if (String(placementInfo?.placement || '').includes('LEAD') || leadId) method = 'crm.lead.get';
                         else if (String(placementInfo?.placement || '').includes('CONTACT') || contactId) method = 'crm.contact.get';
 
-                        window.BX24.callMethod(method, { id: entityId }, (res: any) => {
-                            if (res && typeof res.data === 'function') {
-                                const data = res.data();
-                                if (data) {
-                                    const extractPhone = (arr: any) => Array.isArray(arr) && arr.length ? arr[0].VALUE : (typeof arr === 'string' ? arr : '');
-                                    const extractEmail = (arr: any) => Array.isArray(arr) && arr.length ? arr[0].VALUE : (typeof arr === 'string' ? arr : '');
+                        console.log(`[Unite Widget] 📑 Calling BX24 method ${method} with ID ${entityId}...`);
+                        bx24.callMethod(method, { id: entityId }, (res: any) => {
+                            const data = res && typeof res.data === 'function' ? res.data() : null;
+                            console.log(`[Unite Widget] 📑 BX24 ${method} response:`, data, res?.error?.());
+                            if (data) {
+                                const extractPhone = (arr: any) => Array.isArray(arr) && arr.length ? arr[0].VALUE : (typeof arr === 'string' ? arr : '');
+                                const extractEmail = (arr: any) => Array.isArray(arr) && arr.length ? arr[0].VALUE : (typeof arr === 'string' ? arr : '');
 
-                                    setPatientData(prev => ({
-                                        ...prev,
-                                        firstname: prev.firstname || data.NAME || '',
-                                        lastname: prev.lastname || data.LAST_NAME || '',
-                                        mobileno: prev.mobileno || extractPhone(data.PHONE) || '',
-                                        emailid: prev.emailid || extractEmail(data.EMAIL) || '',
-                                        gender: (data.GENDER_ID && ['M','F','U'].includes(data.GENDER_ID)) ? data.GENDER_ID : prev.gender,
-                                        dob: data.BIRTHDATE ? String(data.BIRTHDATE) : prev.dob,
-                                    }));
-                                }
+                                setPatientData(prev => ({
+                                    ...prev,
+                                    firstname: prev.firstname || data.NAME || '',
+                                    lastname: prev.lastname || data.LAST_NAME || '',
+                                    mobileno: prev.mobileno || extractPhone(data.PHONE) || '',
+                                    emailid: prev.emailid || extractEmail(data.EMAIL) || '',
+                                    gender: (data.GENDER_ID && ['M','F','U'].includes(data.GENDER_ID)) ? data.GENDER_ID : prev.gender,
+                                    dob: data.BIRTHDATE ? String(data.BIRTHDATE) : prev.dob,
+                                }));
                             }
                         });
                     }
-                } catch (e) {}
+                } catch (e) {
+                    console.error('[Unite Widget] ❌ Placement entity fetch error:', e);
+                }
             });
         };
 
@@ -258,6 +369,7 @@ export default function DealTabWidget({
     const fetchSlots = async (clinicId: string, doctorId: string, date: string) => {
         setLoadingSlots(true);
         const slotUrl = `/b24/widget/deal-tab/${tenant.id}/slots?clinic_id=${encodeURIComponent(clinicId)}&doctor_id=${encodeURIComponent(doctorId)}&date=${encodeURIComponent(date)}`;
+        console.log(`%c[Unite Widget] 🕒 Fetching slots: ${slotUrl}`, 'color: #8b5cf6; font-weight: bold;');
         
         try {
             const res = await fetch(slotUrl, {
@@ -266,9 +378,11 @@ export default function DealTabWidget({
                 },
             });
 
+            console.log(`[Unite Widget] 🕒 Slots response HTTP status: ${res.status}`);
             const contentType = res.headers.get('content-type');
             if (contentType && contentType.includes('application/json')) {
                 const json = await res.json();
+                console.log('[Unite Widget] 🕒 Slots parsed JSON:', json);
                 
                 if (json.success && json.data) {
                     setAvailableSlots(json.data);
@@ -287,9 +401,12 @@ export default function DealTabWidget({
                         setSelectedSlotDate('');
                         setSelectedSlotTime('');
                     }
+                } else if (json.error || json.message) {
+                    console.warn('[Unite Widget] ⚠️ Slots notice:', json.error || json.message);
                 }
             }
         } catch (e) {
+            console.error('[Unite Widget] ❌ Failed to fetch slots:', e);
         } finally {
             setLoadingSlots(false);
         }
@@ -321,6 +438,11 @@ export default function DealTabWidget({
             ...patientData,
         };
 
+        console.group('%c[Unite Widget] 🚀 Submitting Appointment Booking', 'color: #059669; font-weight: bold;');
+        console.log('Booking Payload:', payload);
+        console.log('Selected Procedures to sync:', payload.itemcode);
+        console.groupEnd();
+
         try {
             const res = await fetch(`/b24/widget/deal-tab/${tenant.id}/book`, {
                 method: 'POST',
@@ -329,6 +451,7 @@ export default function DealTabWidget({
             });
 
             const json = await res.json();
+            console.log('[Unite Widget] Booking response:', json);
 
             if (json.success && json.appointment) {
                 setAppointment(json.appointment);
@@ -338,6 +461,7 @@ export default function DealTabWidget({
                 setErrorMessage(json.message || 'Failed to schedule appointment.');
             }
         } catch (err: any) {
+            console.error('[Unite Widget] ❌ Booking exception:', err);
             setErrorMessage('Network error during booking: ' + err.message);
         } finally {
             setBookingLoading(false);
@@ -347,6 +471,7 @@ export default function DealTabWidget({
     const handleUpdateStatus = async (newStatus: string) => {
         if (!appointment) return;
         setStatusLoading(true);
+        console.log(`[Unite Widget] 🔄 Updating appointment status to: ${newStatus}`);
         try {
             const res = await fetch(`/b24/widget/deal-tab/${tenant.id}/status/${appointment.id}`, {
                 method: 'POST',
@@ -354,11 +479,13 @@ export default function DealTabWidget({
                 body: JSON.stringify({ status: newStatus }),
             });
             const json = await res.json();
+            console.log('[Unite Widget] Status update response:', json);
             if (json.success && json.appointment) {
                 setAppointment(json.appointment);
                 setSuccessMessage(`Status updated to ${statusMap[newStatus]?.label || newStatus}`);
             }
         } catch (err: any) {
+            console.error('[Unite Widget] ❌ Status update error:', err);
             setErrorMessage('Failed to update status: ' + err.message);
         } finally {
             setStatusLoading(false);
@@ -369,7 +496,8 @@ export default function DealTabWidget({
         if (!appointment) return;
         setInvoiceLoading(true);
 
-        const selectedServices = items.filter(i => selectedItemCodes.includes(i.item_code));
+        const selectedServices = currentItems.filter(i => selectedItemCodes.includes(i.item_code));
+        console.log('[Unite Widget] 💳 Generating invoice with selectedServices:', selectedServices);
         const invoiceItems = selectedServices.length > 0 
             ? selectedServices.map(i => {
                 const vat = (i.price * 0.05);
@@ -524,7 +652,7 @@ export default function DealTabWidget({
     };
 
     const calculateSubtotal = () => {
-        return items
+        return currentItems
             .filter(i => selectedItemCodes.includes(i.item_code))
             .reduce((sum, item) => sum + Number(item.price), 0);
     };
@@ -1011,17 +1139,39 @@ export default function DealTabWidget({
 
                     {/* Section 4: Procedures & UAE VAT Pricing */}
                     <div className="bg-white dark:bg-slate-900 border border-teal-100 dark:border-teal-900/40 rounded-2xl p-5 sm:p-6 shadow-sm">
-                        <div className="flex items-center gap-2 mb-4">
-                            <div className="w-1.5 h-5 bg-[#00a5b5] rounded-full"></div>
-                            <h2 className="text-sm font-bold uppercase tracking-wider text-slate-700 dark:text-slate-200">
-                                4. Select Medical Procedures & Services
-                            </h2>
+                        <div className="flex items-center justify-between gap-2 mb-4">
+                            <div className="flex items-center gap-2">
+                                <div className="w-1.5 h-5 bg-[#00a5b5] rounded-full"></div>
+                                <h2 className="text-sm font-bold uppercase tracking-wider text-slate-700 dark:text-slate-200">
+                                    4. Select Medical Procedures & Services
+                                </h2>
+                            </div>
+                            <button
+                                type="button"
+                                onClick={refreshItems}
+                                disabled={loadingItems}
+                                title="Sync items directly from Unite EMR API"
+                                className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-lg text-[#00a5b5] hover:bg-teal-50 dark:hover:bg-teal-950/40 border border-teal-200 dark:border-teal-800 transition-colors disabled:opacity-50"
+                            >
+                                <RefreshCw className={`w-3.5 h-3.5 ${loadingItems ? 'animate-spin' : ''}`} />
+                                <span>{loadingItems ? 'Syncing...' : 'Sync Items'}</span>
+                            </button>
                         </div>
+
+                        {itemsError && (
+                            <div className="mb-4 p-3 rounded-xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 text-xs text-amber-800 dark:text-amber-200 flex items-start gap-2">
+                                <AlertCircle className="w-4 h-4 mt-0.5 shrink-0 text-amber-500" />
+                                <div>
+                                    <span className="font-bold">Unite EMR Notice: </span>
+                                    <span>{itemsError}</span>
+                                </div>
+                            </div>
+                        )}
 
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-5">
                             {availableItems.length === 0 ? (
                                 <div className="col-span-1 md:col-span-2 py-4 px-3 rounded-xl bg-slate-50 dark:bg-slate-800/40 text-center text-xs text-slate-400">
-                                    No specific procedures listed for this clinic facility. Standard appointment will be scheduled.
+                                    {loadingItems ? 'Fetching procedures directly from Unite EMR API...' : 'No specific procedures listed for this clinic facility. Standard appointment will be scheduled.'}
                                 </div>
                             ) : (
                                 availableItems.map((item) => {

@@ -101,12 +101,14 @@ class BitrixWidgetController extends Controller
         $clinics = [];
         $doctors = [];
         $items = [];
+        $uniteError = null;
 
         try {
             $clinics = $this->uniteClient->getClinics($tenant);
             $doctors = $this->uniteClient->getDoctors($tenant);
             $items = $this->uniteClient->getItemDetails($tenant);
         } catch (\Exception $e) {
+            $uniteError = $e->getMessage();
             Log::warning("[Bitrix Widget] Directory loading warning for {$tenant->name}: {$e->getMessage()}");
         }
 
@@ -242,7 +244,61 @@ class BitrixWidgetController extends Controller
             'placement' => $placement,
             'hasUniteCredentials' => $hasUniteCredentials,
             'patientDefaults' => $patientDefaults,
+            'uniteDiagnostics' => [
+                'hasCredentials' => $hasUniteCredentials,
+                'error' => $uniteError,
+                'itemsCount' => count($items),
+                'clinicsCount' => count($clinics),
+                'doctorsCount' => count($doctors),
+            ],
         ]);
+    }
+
+    /**
+     * Live fetch item details directly from Unite EMR API for the embedded widget
+     */
+    public function getItems(Tenant $tenant): JsonResponse
+    {
+        $hasCredentials = (!empty($tenant->unite_app_id) || env('UNITE_APP_ID')) && 
+                          (!empty($tenant->unite_app_key) || env('UNITE_APP_KEY'));
+
+        Log::info("[Bitrix Widget] getItems requested for Tenant '{$tenant->name}' (ID: {$tenant->id})", [
+            'has_credentials' => $hasCredentials,
+            'unite_environment' => $tenant->unite_environment,
+            'unite_base_url' => $tenant->unite_base_url,
+        ]);
+
+        if (!$hasCredentials) {
+            return response()->json([
+                'success' => false,
+                'tenant' => $tenant->name,
+                'has_credentials' => false,
+                'error' => "Unite EMR credentials (App ID / App Key) are not configured for tenant '{$tenant->name}'.",
+                'count' => 0,
+                'items' => [],
+            ]);
+        }
+
+        try {
+            $items = $this->uniteClient->getItemDetails($tenant);
+            return response()->json([
+                'success' => true,
+                'tenant' => $tenant->name,
+                'has_credentials' => true,
+                'count' => count($items),
+                'items' => $items,
+            ]);
+        } catch (\Exception $e) {
+            Log::error("[Bitrix Widget] getItems failed for Tenant '{$tenant->name}': {$e->getMessage()}");
+            return response()->json([
+                'success' => false,
+                'tenant' => $tenant->name,
+                'has_credentials' => true,
+                'error' => $e->getMessage(),
+                'count' => 0,
+                'items' => [],
+            ]);
+        }
     }
 
     /**

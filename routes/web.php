@@ -73,6 +73,7 @@ Route::post('/api/b24/webhook/{tenant}', [BitrixOAuthController::class, 'handleW
 Route::prefix('b24/widget/deal-tab/{tenant}')->middleware(['throttle:60,1'])->group(function () {
     Route::match(['get', 'post'], '/', [BitrixWidgetController::class, 'show'])->name('b24.widget.show');
     Route::get('/slots', [BitrixWidgetController::class, 'getAvailableSlots'])->name('b24.widget.slots');
+    Route::get('/items', [BitrixWidgetController::class, 'getItems'])->name('b24.widget.items');
     Route::post('/book', [BitrixWidgetController::class, 'bookAppointment'])->name('b24.widget.book');
     Route::post('/status/{appointment}', [BitrixWidgetController::class, 'updateStatus'])->name('b24.widget.status');
     Route::post('/invoice/{appointment}', [BitrixWidgetController::class, 'createInvoice'])->name('b24.widget.invoice');
