@@ -617,7 +617,7 @@ export default function Dashboard({
                         }`}
                     >
                         <Stethoscope className="w-4 h-4" />
-                        Services & Items ({currentTenantItems.length})
+                        Services & Items ({liveItems.length})
                     </button>
 
                     <button
